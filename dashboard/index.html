@@ -1,0 +1,893 @@
+<title>Room Climate Monitor</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Serif&family=Inter:wght@400;500;600&display=swap">
+<style>
+/* Layout: summary row (verdict + two readings) over a stacked history chart, then today's stats and sensor health.
+   Base surfaces from Runway, serif numerals + peach verdict card from Steep, data/status colors from Airtable. */
+:root {
+  --canvas: #f8f7f5;
+  --card: #ffffff;
+  --border: #e3dfd5;
+  --grid: #eeebe4;
+  --ink: #261b07;
+  --body: #61594a;
+  --muted: #8f897e;
+  --chip: #efece6;
+  --peach: #fbe1d1;
+  --peach-ink: #5d2a1a;
+  --peach-chip: rgba(255, 255, 255, 0.6);
+  --temp: #aa2d00;
+  --hum: #1b61c9;
+  --ok: #2f6b36;
+  --warn: #e39a00;
+  --warn-bg: #f8da9d;
+  --warn-ink: #6b4300;
+  --bad: #aa2d00;
+  --bad-bg: #f6d9cd;
+  --off: #9297a0;
+  --btn: #261b07;
+  --btn-fg: #ffffff;
+  --banner: #261b07;
+  --banner-fg: #f8f7f5;
+  --shadow: 0 4px 8px rgba(38, 27, 7, 0.06);
+
+  --font-ui: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-num: "Instrument Serif", "Source Serif 4", Georgia, "Times New Roman", serif;
+  --radius-card: 12px;
+  --radius-ctl: 8px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --canvas: #15110b; --card: #1e1912; --border: #342c20; --grid: #2a2319;
+    --ink: #f3eee4; --body: #c9bfae; --muted: #988f7e; --chip: #2b241a;
+    --peach: #3a2318; --peach-ink: #f7d3be; --peach-chip: rgba(0, 0, 0, 0.25);
+    --temp: #ff7d52; --hum: #73a2ff; --ok: #79c47d; --warn: #fcb42a;
+    --warn-bg: #4a3610; --warn-ink: #fcd27e; --bad: #ff7d52; --bad-bg: #4a2216; --off: #7f848d;
+    --btn: #f3eee4; --btn-fg: #15110b; --banner: #2b241a; --banner-fg: #f3eee4;
+    --shadow: 0 4px 10px rgba(0, 0, 0, 0.35);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --canvas: #15110b; --card: #1e1912; --border: #342c20; --grid: #2a2319;
+  --ink: #f3eee4; --body: #c9bfae; --muted: #988f7e; --chip: #2b241a;
+  --peach: #3a2318; --peach-ink: #f7d3be; --peach-chip: rgba(0, 0, 0, 0.25);
+  --temp: #ff7d52; --hum: #73a2ff; --ok: #79c47d; --warn: #fcb42a;
+  --warn-bg: #4a3610; --warn-ink: #fcd27e; --bad: #ff7d52; --bad-bg: #4a2216; --off: #7f848d;
+  --btn: #f3eee4; --btn-fg: #15110b; --banner: #2b241a; --banner-fg: #f3eee4;
+  --shadow: 0 4px 10px rgba(0, 0, 0, 0.35);
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body {
+  background: var(--canvas);
+  color: var(--ink);
+  font-family: var(--font-ui);
+  font-size: 14px;
+  line-height: 1.25;
+  -webkit-font-smoothing: antialiased;
+}
+.wrap {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.num { font-variant-numeric: tabular-nums; }
+button { font: inherit; color: inherit; cursor: pointer; }
+button:focus-visible { outline: 2px solid var(--hum); outline-offset: 2px; }
+
+/* Mockup banner */
+.banner { background: var(--banner); color: var(--banner-fg); }
+.banner .wrap { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; padding-block: 8px; }
+.banner p { margin: 0; font-size: 13px; opacity: 0.85; }
+.banner .seg { background: transparent; border-color: rgba(255, 255, 255, 0.18); }
+.banner .seg button { color: var(--banner-fg); }
+.banner .seg button[aria-pressed="true"] { background: var(--banner-fg); color: var(--banner); }
+
+/* Header */
+header.top { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 16px; padding-block: 28px 20px; }
+.eyebrow { font-size: 12px; font-weight: 500; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); margin: 0 0 6px; }
+h1 { font-family: var(--font-num); font-weight: 400; font-size: 44px; line-height: 1; letter-spacing: -0.01em; margin: 0; }
+.top-right { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+
+.pill { display: inline-flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 999px; background: var(--card); border: 1px solid var(--border); font-size: 13px; color: var(--body); white-space: nowrap; }
+.pill b { color: var(--ink); font-weight: 600; }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); flex: none; }
+.pill[data-s="live"] .dot { animation: pulse 2s ease-out infinite; }
+.pill[data-s="off"] .dot { background: var(--off); }
+@keyframes pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--ok) 45%, transparent); } 100% { box-shadow: 0 0 0 7px transparent; } }
+
+.seg { display: inline-flex; gap: 2px; padding: 3px; border-radius: var(--radius-ctl); background: var(--card); border: 1px solid var(--border); }
+.seg button { border: 0; background: transparent; padding: 5px 11px; border-radius: 6px; font-size: 13px; font-weight: 500; color: var(--body); }
+.seg button:hover { color: var(--ink); }
+.seg button[aria-pressed="true"] { background: var(--btn); color: var(--btn-fg); }
+
+/* Cards */
+main { display: grid; gap: 16px; padding-block: 0 48px; }
+.card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius-card); box-shadow: var(--shadow); padding: 22px 24px; min-width: 0; }
+.card-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 12px; }
+.card h2 { font-size: 13px; font-weight: 600; margin: 0; color: var(--ink); }
+
+.summary { display: grid; grid-template-columns: 1.15fr 1fr 1fr; gap: 16px; }
+
+/* Verdict card */
+.verdict { background: var(--peach); color: var(--peach-ink); border-color: transparent; display: flex; flex-direction: column; gap: 14px; }
+.verdict .eyebrow { color: var(--peach-ink); opacity: 0.75; margin: 0; }
+.verdict-title { font-family: var(--font-num); font-weight: 400; font-size: 48px; line-height: 1; margin: 0; text-wrap: balance; }
+.verdict-text { margin: 0; font-size: 14px; line-height: 1.4; max-width: 36ch; }
+.verdict-stats { display: flex; flex-wrap: wrap; gap: 8px 28px; margin-top: auto; padding-top: 14px; border-top: 1px solid color-mix(in srgb, var(--peach-ink) 18%, transparent); }
+.verdict-stats div { display: grid; gap: 2px; }
+.verdict-stats span { font-size: 12px; opacity: 0.75; }
+.verdict-stats strong { font-size: 18px; font-weight: 600; }
+.verdict .chip { background: var(--peach-chip); color: var(--peach-ink); }
+
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; border-radius: 4px; background: var(--chip); color: var(--body); font-size: 12px; font-weight: 500; white-space: nowrap; }
+.chip .dot { width: 6px; height: 6px; }
+.chip[data-s="warn"] { background: var(--warn-bg); color: var(--warn-ink); }
+.chip[data-s="warn"] .dot { background: var(--warn); }
+.chip[data-s="bad"] { background: var(--bad-bg); color: var(--bad); }
+.chip[data-s="bad"] .dot { background: var(--bad); }
+.chip[data-s="off"] .dot { background: var(--off); }
+
+/* Reading tiles */
+.tile { display: flex; flex-direction: column; gap: 10px; }
+.reading { display: flex; align-items: baseline; gap: 6px; margin-top: 4px; }
+.reading .value { font-family: var(--font-num); font-size: 76px; line-height: 0.9; letter-spacing: -0.02em; transition: opacity 0.4s; }
+.reading .unit { font-size: 18px; color: var(--body); font-weight: 500; }
+.tile.temp .value { color: var(--ink); }
+.tile.is-off .value, .tile.is-off .unit { color: var(--off); }
+.flash { opacity: 0.45; transition: none !important; }
+.trend { font-size: 13px; color: var(--body); display: flex; align-items: center; gap: 6px; }
+.trend .arrow { font-weight: 600; }
+.spark { display: block; width: 100%; height: 44px; margin-top: auto; }
+.tile.temp .spark { color: var(--temp); }
+.tile.hum .spark { color: var(--hum); }
+.tile.is-off .spark { color: var(--off); }
+
+/* History */
+.history .card-head { margin-bottom: 18px; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; color: var(--body); }
+.legend i { display: inline-block; width: 14px; height: 10px; border-radius: 2px; vertical-align: -1px; margin-right: 6px; }
+.charts { position: relative; display: grid; gap: 10px; touch-action: pan-y; }
+.chart-label { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--body); margin-bottom: 2px; }
+.chart-label b { font-weight: 600; }
+.chart-temp { color: var(--temp); }
+.chart-hum { color: var(--hum); }
+.chart-temp .chart-label b, .chart-hum .chart-label b { color: currentColor; }
+.charts svg { display: block; width: 100%; overflow: visible; }
+.charts text { font-family: var(--font-ui); font-size: 11px; fill: var(--muted); font-variant-numeric: tabular-nums; }
+.charts .endlabel { font-size: 12px; font-weight: 600; fill: currentColor; }
+.cursor { position: absolute; top: 0; bottom: 26px; width: 1px; background: var(--muted); opacity: 0.6; pointer-events: none; }
+.cursor-dot { position: absolute; width: 9px; height: 9px; margin: -4.5px 0 0 -4.5px; border-radius: 50%; border: 2px solid var(--card); pointer-events: none; }
+.tooltip { position: absolute; top: 0; z-index: 2; pointer-events: none; background: var(--card); border: 1px solid var(--border); box-shadow: var(--shadow); border-radius: 8px; padding: 8px 10px; font-size: 12px; display: grid; gap: 4px; min-width: 150px; }
+.tooltip .t { color: var(--muted); }
+.tooltip .r { display: flex; justify-content: space-between; gap: 12px; }
+.tooltip .r b { font-weight: 600; }
+
+/* Bottom row */
+.bottom { display: grid; grid-template-columns: 2fr 1fr; gap: 16px; }
+.today-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; margin-top: 18px; }
+.stat { display: grid; gap: 4px; padding: 0 16px; border-left: 1px solid var(--border); }
+.stat:first-child { padding-left: 0; border-left: 0; }
+.stat span { font-size: 12px; color: var(--body); }
+.stat strong { font-family: var(--font-num); font-size: 34px; font-weight: 400; line-height: 1; }
+.stat strong small { font-family: var(--font-ui); font-size: 13px; color: var(--body); margin-left: 3px; }
+.stat em { font-style: normal; font-size: 12px; color: var(--muted); }
+.today-foot { margin: 18px 0 0; padding-top: 14px; border-top: 1px solid var(--border); font-size: 13px; color: var(--body); }
+.today-foot b { color: var(--ink); font-weight: 600; }
+
+dl.facts { margin: 14px 0 0; display: grid; gap: 0; }
+dl.facts div { display: flex; justify-content: space-between; gap: 12px; padding: 9px 0; border-top: 1px solid var(--border); font-size: 13px; }
+dl.facts div:first-child { border-top: 0; }
+dl.facts dt { color: var(--body); }
+dl.facts dd { margin: 0; text-align: right; font-weight: 500; min-width: 0; overflow-wrap: anywhere; }
+dl.facts code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; }
+
+@media (max-width: 960px) {
+  .summary { grid-template-columns: 1fr 1fr; }
+  .verdict { grid-column: 1 / -1; }
+  .bottom { grid-template-columns: 1fr; }
+}
+@media (max-width: 560px) {
+  h1 { font-size: 36px; }
+  .summary { grid-template-columns: 1fr; }
+  .reading .value { font-size: 64px; }
+  .verdict-title { font-size: 40px; }
+  .card { padding: 18px; }
+  .today-grid { grid-template-columns: 1fr 1fr; row-gap: 18px; }
+  .stat:nth-child(3) { padding-left: 0; border-left: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pill[data-s="live"] .dot { animation: none; }
+  .reading .value { transition: none; }
+}
+</style>
+
+<div class="banner">
+  <div class="wrap">
+    <p id="broker-text">MQTT broker: connecting…</p>
+    <p>History is kept only while this page is open (database comes later).</p>
+  </div>
+</div>
+
+<div class="wrap">
+  <header class="top">
+    <div>
+      <p class="eyebrow">Room climate</p>
+      <h1>Living room</h1>
+    </div>
+    <div class="top-right">
+      <span class="pill" id="live-pill" data-s="live"><span class="dot"></span><span id="live-text"><b>Live</b> · updated just now</span></span>
+      <div class="seg" role="group" aria-label="Temperature unit" id="unit">
+        <button type="button" id="unit-c" data-unit="C" aria-pressed="true">°C</button>
+        <button type="button" id="unit-f" data-unit="F" aria-pressed="false">°F</button>
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <section class="summary">
+      <article class="card verdict" aria-live="polite">
+        <div class="card-head">
+          <p class="eyebrow">Right now</p>
+          <span class="chip" id="verdict-chip" data-s="ok"><span class="dot"></span><span>All good</span></span>
+        </div>
+        <p class="verdict-title" id="verdict-title">Comfortable</p>
+        <p class="verdict-text" id="verdict-text">Temperature and humidity are both in the comfortable range.</p>
+        <div class="verdict-stats">
+          <div><span>Feels like</span><strong class="num" id="feels">–</strong></div>
+          <div><span>Dew point</span><strong class="num" id="dew">–</strong></div>
+        </div>
+      </article>
+
+      <article class="card tile temp" id="tile-temp">
+        <div class="card-head">
+          <h2>Temperature</h2>
+          <span class="chip" id="temp-chip"><span class="dot"></span><span>In range</span></span>
+        </div>
+        <div class="reading"><span class="value num" id="temp-value">–</span><span class="unit" id="temp-unit">°C</span></div>
+        <div class="trend" id="temp-trend">–</div>
+        <svg class="spark" id="temp-spark" aria-hidden="true"></svg>
+      </article>
+
+      <article class="card tile hum" id="tile-hum">
+        <div class="card-head">
+          <h2>Humidity</h2>
+          <span class="chip" id="hum-chip"><span class="dot"></span><span>In range</span></span>
+        </div>
+        <div class="reading"><span class="value num" id="hum-value">–</span><span class="unit">%</span></div>
+        <div class="trend" id="hum-trend">–</div>
+        <svg class="spark" id="hum-spark" aria-hidden="true"></svg>
+      </article>
+    </section>
+
+    <section class="card history">
+      <div class="card-head">
+        <h2>History</h2>
+        <div class="seg" role="group" aria-label="Time range" id="range">
+          <button type="button" id="range-1h" data-range="1h" aria-pressed="false">1 hour</button>
+          <button type="button" id="range-24h" data-range="24h" aria-pressed="true">24 hours</button>
+          <button type="button" id="range-7d" data-range="7d" aria-pressed="false">7 days</button>
+        </div>
+      </div>
+      <div class="charts" id="charts">
+        <div class="chart-temp">
+          <div class="chart-label"><span><b>Temperature</b> <span id="temp-axis-unit">°C</span></span><span id="temp-band-label">Shaded: comfortable 20–26°</span></div>
+          <svg id="chart-temp" role="img"></svg>
+        </div>
+        <div class="chart-hum">
+          <div class="chart-label"><span><b>Humidity</b> %</span><span>Shaded: comfortable 30–60%</span></div>
+          <svg id="chart-hum" role="img"></svg>
+        </div>
+        <div class="cursor" id="cursor" hidden></div>
+        <div class="cursor-dot" id="cursor-temp" style="background: var(--temp)" hidden></div>
+        <div class="cursor-dot" id="cursor-hum" style="background: var(--hum)" hidden></div>
+        <div class="tooltip" id="tooltip" hidden></div>
+      </div>
+    </section>
+
+    <section class="bottom">
+      <article class="card">
+        <div class="card-head">
+          <h2>Today</h2>
+          <span class="chip"><span>Since midnight</span></span>
+        </div>
+        <div class="today-grid" id="today"></div>
+        <p class="today-foot" id="today-foot"></p>
+      </article>
+
+      <article class="card">
+        <div class="card-head">
+          <h2>Sensor</h2>
+          <span class="chip" id="sensor-chip" data-s="ok"><span class="dot"></span><span>Online</span></span>
+        </div>
+        <dl class="facts" id="facts"></dl>
+      </article>
+    </section>
+  </main>
+</div>
+
+<script src="https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js"></script>
+<script>
+// Broker address: opened from this laptop, "localhost" works. On another device
+// (e.g. the hand-held), open the page with ?broker=ws://<laptop-ip>:9001
+const params = new URLSearchParams(location.search);
+const CFG = {
+  broker: params.get("broker") || `ws://${location.hostname || "localhost"}:9001`,
+  device: params.get("device") || "esp32-room1",
+  sensor: "DHT11",
+  pin: 4,
+  intervalSec: 5,       // must match READ_INTERVAL_MS in the ESP32 sketch
+  decimals: 1,
+  offlineAfterSec: 30,
+  maxHistoryDays: 7,
+  comfort: { tMin: 20, tMax: 26, hMin: 30, hMax: 60 },
+};
+const TOPIC = `sensors/${CFG.device}/data`;
+
+const MIN = 60e3, HOUR = 60 * MIN, DAY = 24 * HOUR;
+const RANGES = {
+  "1h":  { span: HOUR,     bucket: MIN },
+  "24h": { span: DAY,      bucket: 5 * MIN },
+  "7d":  { span: 7 * DAY,  bucket: HOUR },
+};
+
+const $ = (id) => document.getElementById(id);
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); } catch {} },
+};
+
+const state = {
+  unit: store.get("unit") === "F" ? "F" : "C",
+  range: RANGES[store.get("range")] ? store.get("range") : "24h",
+  history: [],          // { t, temp, hum } — one entry per MQTT message
+  lastTick: null,       // time the last reading arrived
+  conn: "connecting",   // broker connection: connecting | connected | reconnecting | error
+  connError: "",
+};
+
+/* ---------- Live data from the MQTT broker (MQTT over WebSockets) ---------- */
+
+function setBrokerText() {
+  const label = {
+    connecting: "connecting…",
+    connected: "connected",
+    reconnecting: "connection lost, retrying…",
+    error: `error: ${state.connError}`,
+  }[state.conn];
+  $("broker-text").innerHTML = `MQTT broker <code>${CFG.broker}</code> · <b>${label}</b> · topic <code>${TOPIC}</code>`;
+}
+
+function onReading(payload) {
+  let data;
+  try { data = JSON.parse(payload); } catch { return console.warn("Not JSON:", payload); }
+  const temp = Number(data.temperature), hum = Number(data.humidity);
+  if (!isFinite(temp) || !isFinite(hum)) return console.warn("Missing values:", data);
+  const t = Date.now();
+  state.history.push({ t, temp, hum });
+  const cut = t - CFG.maxHistoryDays * DAY;
+  while (state.history.length && state.history[0].t < cut) state.history.shift();
+  state.lastTick = t;
+  render();
+}
+
+function connectBroker() {
+  if (typeof mqtt === "undefined") {
+    state.conn = "error";
+    state.connError = "MQTT library failed to load (no internet?)";
+    setBrokerText();
+    return;
+  }
+  const client = mqtt.connect(CFG.broker, {
+    clientId: `dashboard-${Math.random().toString(16).slice(2, 10)}`,
+    reconnectPeriod: 3000,
+    keepalive: 30,
+  });
+  client.on("connect", () => {
+    state.conn = "connected"; setBrokerText(); render();
+    client.subscribe(TOPIC, { qos: 0 });
+  });
+  client.on("reconnect", () => { state.conn = "reconnecting"; setBrokerText(); });
+  client.on("close", () => { if (state.conn === "connected") { state.conn = "reconnecting"; setBrokerText(); } });
+  client.on("error", (err) => { state.conn = "error"; state.connError = err.message; setBrokerText(); });
+  client.on("message", (topic, message) => { if (topic === TOPIC) onReading(message.toString()); });
+}
+
+/* ---------- Data access ---------- */
+
+function readings() { return state.history; }
+function lastSeen() { return state.lastTick; }
+function isOffline() { return Date.now() - lastSeen() > CFG.offlineAfterSec * 1000; }
+
+function nearestBefore(pts, t) {
+  let lo = 0, hi = pts.length - 1;
+  while (lo < hi) { const mid = (lo + hi + 1) >> 1; if (pts[mid].t <= t) lo = mid; else hi = mid - 1; }
+  return pts[lo];
+}
+
+function series(pts, rangeKey) {
+  const { span, bucket } = RANGES[rangeKey];
+  const t1 = Date.now(), t0 = t1 - span;
+  const inRange = pts.filter((p) => p.t >= t0);
+  if (bucket === MIN) {
+    return { t0, t1, bucket, pts: inRange.map((p) => ({ t: p.t, temp: p.temp, hum: p.hum })) };
+  }
+  const groups = new Map();
+  for (const p of inRange) {
+    const k = Math.floor(p.t / bucket) * bucket;
+    let g = groups.get(k);
+    if (!g) groups.set(k, (g = { n: 0, ts: 0, hs: 0, tlo: Infinity, thi: -Infinity, hlo: Infinity, hhi: -Infinity }));
+    g.n++; g.ts += p.temp; g.hs += p.hum;
+    g.tlo = Math.min(g.tlo, p.temp); g.thi = Math.max(g.thi, p.temp);
+    g.hlo = Math.min(g.hlo, p.hum); g.hhi = Math.max(g.hhi, p.hum);
+  }
+  const out = [...groups.entries()].map(([k, g]) => ({
+    t: k + bucket / 2, temp: g.ts / g.n, hum: g.hs / g.n,
+    tempLo: g.tlo, tempHi: g.thi, humLo: g.hlo, humHi: g.hhi,
+  }));
+  return { t0, t1, bucket, pts: out };
+}
+
+/* ---------- Formatting ---------- */
+
+const toUnit = (c) => (state.unit === "F" ? (c * 9) / 5 + 32 : c);
+const toUnitDelta = (c) => (state.unit === "F" ? (c * 9) / 5 : c);
+const fmt = (v, d = CFG.decimals) => v.toFixed(d).replace("-", "−");
+const tempStr = (c, d) => `${fmt(toUnit(c), d)}°`;
+const timeStr = (t) => new Date(t).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+const dayStr = (t) => new Date(t).toLocaleDateString([], { weekday: "short", day: "numeric" });
+
+function ago(ms) {
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 5) return "just now";
+  if (s < 60) return `${s} s ago`;
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m} min ago`;
+  return `${Math.round(m / 60)} h ago`;
+}
+
+function dewPoint(t, rh) {
+  const a = 17.62, b = 243.12;
+  const g = Math.log(rh / 100) + (a * t) / (b + t);
+  return (b * g) / (a - g);
+}
+function heatIndex(t, rh) {
+  // NOAA formula; below ~27 °C the felt temperature is close to the air temperature
+  const f = (t * 9) / 5 + 32;
+  let hi = 0.5 * (f + 61 + (f - 68) * 1.2 + rh * 0.094);
+  if (hi >= 80) {
+    hi = -42.379 + 2.04901523 * f + 10.14333127 * rh - 0.22475541 * f * rh - 0.00683783 * f * f
+      - 0.05481717 * rh * rh + 0.00122874 * f * f * rh + 0.00085282 * f * rh * rh - 0.00000199 * f * f * rh * rh;
+  }
+  return ((hi - 32) * 5) / 9;
+}
+
+/* ---------- Status rules ---------- */
+
+function tempStatus(t) {
+  const { tMin, tMax } = CFG.comfort;
+  if (t > tMax + 2) return { s: "bad", label: "Too warm", dir: "high" };
+  if (t > tMax) return { s: "warn", label: "Warm", dir: "high" };
+  if (t < tMin - 2) return { s: "bad", label: "Too cold", dir: "low" };
+  if (t < tMin) return { s: "warn", label: "Cool", dir: "low" };
+  return { s: "ok", label: "In range" };
+}
+function humStatus(h) {
+  const { hMin, hMax } = CFG.comfort;
+  if (h > hMax + 10) return { s: "bad", label: `Above ${hMax + 10}%`, dir: "high" };
+  if (h > hMax) return { s: "warn", label: `Above ${hMax}%`, dir: "high" };
+  if (h < hMin - 5) return { s: "bad", label: `Below ${hMin - 5}%`, dir: "low" };
+  if (h < hMin) return { s: "warn", label: `Below ${hMin}%`, dir: "low" };
+  return { s: "ok", label: "In range" };
+}
+const RANK = { ok: 0, warn: 1, bad: 2 };
+
+function verdict(cur, offline) {
+  if (offline) {
+    return {
+      s: "off", chip: "Offline", title: "No recent data",
+      text: `The sensor hasn't reported for ${ago(Date.now() - lastSeen()).replace(" ago", "")}. Check that the ESP32 has power and is connected to WiFi.`,
+    };
+  }
+  const ts = tempStatus(cur.temp), hs = humStatus(cur.hum);
+  const worst = RANK[hs.s] >= RANK[ts.s] ? { k: "hum", ...hs } : { k: "temp", ...ts };
+  const chip = { ok: "All good", warn: "Needs attention", bad: "Act now" }[worst.s];
+  if (worst.s === "ok") return { s: "ok", chip, title: "Comfortable", text: "Temperature and humidity are both in the comfortable range." };
+  const msgs = {
+    hum: {
+      high: worst.s === "bad"
+        ? ["Too humid", "Above 70% mold can start to grow. Open a window or run a dehumidifier."]
+        : ["A bit humid", "Humidity is above 60%. Airing the room for a few minutes will bring it down."],
+      low: ["Too dry", "Below 30% the air can irritate eyes, skin and throat. A humidifier helps."],
+    },
+    temp: {
+      high: ["Too warm", "The room is above 26°C. Open a window or turn the heating down."],
+      low: ["Too cold", "The room is below 20°C. Close windows or turn the heating up."],
+    },
+  };
+  const [title, text] = msgs[worst.k][worst.dir];
+  return { s: worst.s, chip, title, text };
+}
+
+function setChip(el, s, text) {
+  el.dataset.s = s;
+  el.innerHTML = `<span class="dot"></span><span>${text}</span>`;
+}
+
+/* ---------- Charts ---------- */
+
+function niceStep(span, count) {
+  const raw = span / count, mag = 10 ** Math.floor(Math.log10(raw)), n = raw / mag;
+  return (n < 1.5 ? 1 : n < 3 ? 2 : n < 7 ? 5 : 10) * mag;
+}
+
+function timeTicks(t0, t1, rangeKey) {
+  const ticks = [];
+  if (rangeKey === "7d") {
+    const d = new Date(t0); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() + 1);
+    for (; d.getTime() <= t1; d.setDate(d.getDate() + 1)) ticks.push({ t: d.getTime(), label: dayStr(d) });
+    return ticks;
+  }
+  const step = rangeKey === "1h" ? 15 * MIN : 4 * HOUR;
+  const d = new Date(t0); d.setMinutes(0, 0, 0);
+  for (let t = d.getTime(); t <= t1; t += rangeKey === "1h" ? 15 * MIN : HOUR) {
+    if (t < t0) continue;
+    if (rangeKey === "24h" && new Date(t).getHours() % 4 !== 0) continue;
+    ticks.push({ t, label: timeStr(t) });
+  }
+  return ticks;
+}
+
+function segments(pts, maxGap) {
+  const segs = [];
+  let cur = [];
+  for (const p of pts) {
+    if (cur.length && p.t - cur[cur.length - 1].t > maxGap) { segs.push(cur); cur = []; }
+    cur.push(p);
+  }
+  if (cur.length) segs.push(cur);
+  return segs;
+}
+
+const scales = {};
+
+function drawChart(svg, s, key, opt) {
+  const W = Math.max(280, svg.parentElement.clientWidth);
+  const H = opt.showX ? 170 : 144;
+  const m = { l: 40, r: 52, t: 8, b: opt.showX ? 26 : 6 };
+  const iw = W - m.l - m.r, ih = H - m.t - m.b;
+  const conv = opt.conv;
+  const pts = s.pts.map((p) => ({ t: p.t, v: conv(p[key]), lo: p[key + "Lo"] != null ? conv(p[key + "Lo"]) : null, hi: p[key + "Hi"] != null ? conv(p[key + "Hi"]) : null }));
+  const band = opt.band.map(conv);
+
+  let vmin = Math.min(band[0], ...pts.map((p) => p.lo ?? p.v));
+  let vmax = Math.max(band[1], ...pts.map((p) => p.hi ?? p.v));
+  if (!isFinite(vmin)) { vmin = band[0]; vmax = band[1]; }
+  const pad = (vmax - vmin) * 0.08 || 1;
+  const step = niceStep(vmax - vmin + 2 * pad, 4);
+  const lo = Math.floor((vmin - pad) / step) * step, hi = Math.ceil((vmax + pad) / step) * step;
+
+  const x = (t) => m.l + ((t - s.t0) / (s.t1 - s.t0)) * iw;
+  const y = (v) => m.t + (1 - (v - lo) / (hi - lo)) * ih;
+  scales[key] = { x, y, m, iw, W, pts };
+
+  let out = `<defs><linearGradient id="g-${key}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="currentColor" stop-opacity="0.16"/><stop offset="1" stop-color="currentColor" stop-opacity="0"/></linearGradient></defs>`;
+
+  // comfortable range band
+  const by0 = y(Math.min(band[1], hi)), by1 = y(Math.max(band[0], lo));
+  out += `<rect x="${m.l}" y="${by0}" width="${iw}" height="${Math.max(0, by1 - by0)}" fill="currentColor" opacity="0.07"/>`;
+  out += `<line x1="${m.l}" x2="${m.l + iw}" y1="${by0}" y2="${by0}" stroke="currentColor" stroke-opacity="0.25" stroke-dasharray="3 4"/>`;
+  out += `<line x1="${m.l}" x2="${m.l + iw}" y1="${by1}" y2="${by1}" stroke="currentColor" stroke-opacity="0.25" stroke-dasharray="3 4"/>`;
+
+  // value grid + labels
+  for (let v = lo; v <= hi + 1e-9; v += step) {
+    const yy = y(v);
+    out += `<line x1="${m.l}" x2="${m.l + iw}" y1="${yy}" y2="${yy}" stroke="var(--grid)"/>`;
+    out += `<text x="${m.l - 8}" y="${yy + 4}" text-anchor="end">${fmt(v, step < 1 ? 1 : 0)}</text>`;
+  }
+
+  // time grid + labels
+  const ticks = timeTicks(s.t0, s.t1, state.range);
+  const every = iw < 420 && ticks.length > 4 ? 2 : 1;
+  ticks.forEach((tk, i) => {
+    const xx = x(tk.t);
+    out += `<line x1="${xx}" x2="${xx}" y1="${m.t}" y2="${m.t + ih}" stroke="var(--grid)"/>`;
+    if (opt.showX && i % every === 0) out += `<text x="${xx}" y="${H - 6}" text-anchor="middle">${tk.label}</text>`;
+  });
+
+  // data
+  const segs = segments(pts, s.bucket * 2.5);
+  const baseY = m.t + ih;
+  for (const seg of segs) {
+    const line = seg.map((p, i) => `${i ? "L" : "M"}${x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`).join("");
+    if (seg[0].lo != null) {
+      const upper = seg.map((p, i) => `${i ? "L" : "M"}${x(p.t).toFixed(1)},${y(p.hi).toFixed(1)}`).join("");
+      const lower = seg.slice().reverse().map((p) => `L${x(p.t).toFixed(1)},${y(p.lo).toFixed(1)}`).join("");
+      out += `<path d="${upper}${lower}Z" fill="currentColor" opacity="0.15"/>`;
+    } else {
+      out += `<path d="${line}L${x(seg[seg.length - 1].t).toFixed(1)},${baseY}L${x(seg[0].t).toFixed(1)},${baseY}Z" fill="url(#g-${key})"/>`;
+    }
+    out += `<path d="${line}" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linejoin="round" stroke-linecap="round"/>`;
+  }
+
+  // latest point
+  const last = pts[pts.length - 1];
+  if (last && !isOffline()) {
+    const lx = x(last.t), ly = y(last.v);
+    out += `<circle cx="${lx}" cy="${ly}" r="4" fill="currentColor" stroke="var(--card)" stroke-width="2"/>`;
+    out += `<text class="endlabel" x="${lx + 9}" y="${ly + 4}">${fmt(last.v, 0)}${opt.suffix}</text>`;
+  } else if (last) {
+    out += `<text x="${m.l + iw + 6}" y="${m.t + 12}">no data</text>`;
+  }
+
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.setAttribute("height", H);
+  svg.innerHTML = out;
+  const vals = pts.map((p) => p.v);
+  svg.setAttribute("aria-label", vals.length
+    ? `${opt.name} over the last ${state.range}: between ${fmt(Math.min(...vals))} and ${fmt(Math.max(...vals))}${opt.suffix}`
+    : `${opt.name}: no data`);
+}
+
+function drawSpark(svg, pts, key, conv) {
+  const W = Math.max(120, svg.clientWidth), H = 44;
+  if (pts.length < 2) { svg.innerHTML = ""; return; }
+  const t1 = Date.now(), t0 = t1 - HOUR;
+  const vals = pts.map((p) => conv(p[key]));
+  const lo = Math.min(...vals), hi = Math.max(...vals), span = hi - lo || 1;
+  const x = (t) => 2 + ((t - t0) / (t1 - t0)) * (W - 8);
+  const y = (v) => 6 + (1 - (v - lo) / span) * (H - 12);
+  const line = pts.map((p, i) => `${i ? "L" : "M"}${x(p.t).toFixed(1)},${y(conv(p[key])).toFixed(1)}`).join("");
+  const lp = pts[pts.length - 1];
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.innerHTML =
+    `<defs><linearGradient id="sg-${key}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="currentColor" stop-opacity="0.18"/><stop offset="1" stop-color="currentColor" stop-opacity="0"/></linearGradient></defs>` +
+    `<path d="${line}L${x(lp.t).toFixed(1)},${H}L${x(pts[0].t).toFixed(1)},${H}Z" fill="url(#sg-${key})"/>` +
+    `<path d="${line}" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/>` +
+    `<circle cx="${x(lp.t)}" cy="${y(conv(lp[key]))}" r="3" fill="currentColor"/>`;
+}
+
+/* ---------- Render ---------- */
+
+let lastShown = {};
+function setValue(el, text) {
+  if (el.textContent === text) return;
+  el.textContent = text;
+  if (lastShown[el.id] !== undefined && !matchMedia("(prefers-reduced-motion: reduce)").matches) {
+    el.classList.add("flash");
+    requestAnimationFrame(() => requestAnimationFrame(() => el.classList.remove("flash")));
+  }
+  lastShown[el.id] = text;
+}
+
+function trendText(pts, cur, key, isTemp) {
+  const past = nearestBefore(pts, cur.t - 30 * MIN);
+  if (!past || cur.t - past.t < 20 * MIN) return "Not enough data for a trend yet";
+  const d = cur[key] - past[key];
+  const thresh = isTemp ? 0.3 : 1.5;
+  const shown = isTemp ? `${fmt(toUnitDelta(Math.abs(d)))}°` : `${fmt(Math.abs(d), 0)}%`;
+  if (d > thresh) return `<span class="arrow">↑</span> Rising · +${shown} in 30 min`;
+  if (d < -thresh) return `<span class="arrow">↓</span> Falling · −${shown} in 30 min`;
+  return `<span class="arrow">→</span> Steady over the last 30 min`;
+}
+
+function renderWaiting() {
+  $("live-pill").dataset.s = "off";
+  $("live-text").innerHTML = `<b>Waiting</b> · no reading yet`;
+  setChip($("verdict-chip"), "off", "Waiting");
+  $("verdict-title").textContent = "Waiting for data";
+  $("verdict-text").textContent = state.conn === "connected"
+    ? `Connected to the broker. The first reading should arrive within ${CFG.intervalSec} seconds.`
+    : "Connecting to the MQTT broker. Make sure Mosquitto is running with the WebSocket listener on port 9001.";
+  $("feels").textContent = $("dew").textContent = "–";
+  for (const k of ["temp", "hum"]) {
+    $(`tile-${k}`).classList.add("is-off");
+    $(`${k}-value`).textContent = "–";
+    setChip($(`${k}-chip`), "off", "No data");
+    $(`${k}-trend`).textContent = "–";
+    $(`${k}-spark`).innerHTML = "";
+    $(`chart-${k}`).innerHTML = "";
+  }
+  $("today").innerHTML = "";
+  $("today-foot").textContent = "No readings yet.";
+  setChip($("sensor-chip"), "off", "Waiting");
+  const row = (k, v) => `<div><dt>${k}</dt><dd>${v}</dd></div>`;
+  $("facts").innerHTML =
+    row("Device", CFG.device) +
+    row("Sensor", `${CFG.sensor} on GPIO ${CFG.pin}`) +
+    row("MQTT topic", `<code>${TOPIC}</code>`);
+}
+
+function render() {
+  const pts = readings();
+  if (!pts.length) return renderWaiting();
+  const cur = pts[pts.length - 1];
+  const off = isOffline();
+  const now = Date.now();
+  const u = `°${state.unit}`;
+
+  // header status
+  const pill = $("live-pill");
+  pill.dataset.s = off ? "off" : "live";
+  $("live-text").innerHTML = off
+    ? `<b>Offline</b> · last reading ${ago(now - lastSeen())}`
+    : `<b>Live</b> · updated ${ago(now - lastSeen())}`;
+
+  // verdict
+  const v = verdict(cur, off);
+  setChip($("verdict-chip"), v.s, v.chip);
+  $("verdict-title").textContent = v.title;
+  $("verdict-text").textContent = v.text;
+  $("feels").textContent = off ? "–" : `${tempStr(heatIndex(cur.temp, cur.hum))}${state.unit}`;
+  $("dew").textContent = off ? "–" : `${tempStr(dewPoint(cur.temp, cur.hum))}${state.unit}`;
+
+  // tiles
+  const ts = tempStatus(cur.temp), hs = humStatus(cur.hum);
+  $("tile-temp").classList.toggle("is-off", off);
+  $("tile-hum").classList.toggle("is-off", off);
+  setValue($("temp-value"), fmt(toUnit(cur.temp)));
+  setValue($("hum-value"), fmt(cur.hum, 0));
+  $("temp-unit").textContent = u;
+  setChip($("temp-chip"), off ? "off" : ts.s, off ? "Stale" : ts.label);
+  setChip($("hum-chip"), off ? "off" : hs.s, off ? "Stale" : hs.label);
+  const offText = `No new data since ${timeStr(lastSeen())}`;
+  $("temp-trend").innerHTML = off ? offText : trendText(pts, cur, "temp", true);
+  $("hum-trend").innerHTML = off ? offText : trendText(pts, cur, "hum", false);
+  const lastHour = pts.filter((p) => p.t >= now - HOUR);
+  drawSpark($("temp-spark"), lastHour, "temp", toUnit);
+  drawSpark($("hum-spark"), lastHour, "hum", (h) => h);
+
+  // history
+  const s = series(pts, state.range);
+  const { tMin, tMax, hMin, hMax } = CFG.comfort;
+  $("temp-axis-unit").textContent = u;
+  $("temp-band-label").textContent = `Shaded: comfortable ${fmt(toUnit(tMin), 0)}–${fmt(toUnit(tMax), 0)}${u}`;
+  drawChart($("chart-temp"), s, "temp", { band: [tMin, tMax], conv: toUnit, suffix: "°", name: "Temperature", showX: false });
+  drawChart($("chart-hum"), s, "hum", { band: [hMin, hMax], conv: (h) => h, suffix: "%", name: "Humidity", showX: true });
+  if (hoverT != null) showCursor(hoverT);
+
+  renderToday(pts, now);
+  renderFacts(pts, now, off);
+}
+
+function renderToday(pts, now) {
+  const mid = new Date(now); mid.setHours(0, 0, 0, 0);
+  const today = pts.filter((p) => p.t >= mid.getTime());
+  if (!today.length) { $("today").innerHTML = ""; $("today-foot").textContent = "No readings yet today."; return; }
+  const pick = (key, cmp) => today.reduce((a, b) => (cmp(b[key], a[key]) ? b : a));
+  const tLo = pick("temp", (a, b) => a < b), tHi = pick("temp", (a, b) => a > b);
+  const hLo = pick("hum", (a, b) => a < b), hHi = pick("hum", (a, b) => a > b);
+  const stat = (label, val, unit, t) => `<div class="stat"><span>${label}</span><strong class="num">${val}<small>${unit}</small></strong><em>at ${timeStr(t)}</em></div>`;
+  $("today").innerHTML =
+    stat("Coolest", fmt(toUnit(tLo.temp)), `°${state.unit}`, tLo.t) +
+    stat("Warmest", fmt(toUnit(tHi.temp)), `°${state.unit}`, tHi.t) +
+    stat("Driest", fmt(hLo.hum, 0), "%", hLo.t) +
+    stat("Most humid", fmt(hHi.hum, 0), "%", hHi.t);
+  const avgT = today.reduce((a, p) => a + p.temp, 0) / today.length;
+  const avgH = today.reduce((a, p) => a + p.hum, 0) / today.length;
+  const inBand = today.filter((p) => tempStatus(p.temp).s === "ok" && humStatus(p.hum).s === "ok").length;
+  $("today-foot").innerHTML =
+    `Average <b class="num">${tempStr(avgT)}${state.unit}</b> and <b class="num">${fmt(avgH, 0)}%</b> · comfortable <b class="num">${Math.round((inBand / today.length) * 100)}%</b> of the time`;
+}
+
+function renderFacts(pts, now, off) {
+  // count only the time since the page opened, so a fresh page isn't reported as "missing" readings
+  const since = Math.max(now - HOUR, state.openedAt);
+  const expected = Math.max(1, Math.floor((now - since) / 1000 / CFG.intervalSec));
+  const gotHour = Math.min(expected, pts.filter((p) => p.t >= since).length);
+  const day = pts.filter((p) => p.t >= now - DAY);
+  const gaps = [];
+  for (let i = 1; i < day.length; i++) if (day[i].t - day[i - 1].t > 3 * MIN) gaps.push([day[i - 1].t, day[i].t]);
+  const gapText = gaps.length
+    ? `${gaps.length} · ${Math.round((gaps[0][1] - gaps[0][0]) / MIN)} min at ${timeStr(gaps[0][0])}`
+    : "None";
+  setChip($("sensor-chip"), off ? "off" : "ok", off ? "Offline" : "Online");
+  const row = (k, v) => `<div><dt>${k}</dt><dd>${v}</dd></div>`;
+  $("facts").innerHTML =
+    row("Last reading", `<span class="num">${timeStr(lastSeen())}</span> · ${ago(now - lastSeen())}`) +
+    row(now - state.openedAt < HOUR ? "Readings since page opened" : "Readings, last hour", `<span class="num">${gotHour} of ${expected}</span>`) +
+    row("Gaps, last 24 hours", gapText) +
+    row("Device", `${CFG.device}`) +
+    row("Sensor", `${CFG.sensor} on GPIO ${CFG.pin}`) +
+    row("MQTT topic", `<code>${TOPIC}</code>`);
+}
+
+/* ---------- Hover ---------- */
+
+let hoverT = null;
+function showCursor(t) {
+  const st = scales.temp, sh = scales.hum;
+  if (!st || !st.pts.length) return hideCursor();
+  const pts = st.pts;
+  let lo = 0, hi = pts.length - 1;
+  while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (pts[mid].t < t) lo = mid; else hi = mid; }
+  const i = Math.abs(pts[lo].t - t) < Math.abs(pts[hi].t - t) ? lo : hi;
+  const bucket = RANGES[state.range].bucket;
+  if (Math.abs(pts[i].t - t) > bucket * 1.5) return hideCursor();
+
+  const charts = $("charts");
+  const svgT = $("chart-temp"), svgH = $("chart-hum");
+  const base = charts.getBoundingClientRect();
+  const rT = svgT.getBoundingClientRect(), rH = svgH.getBoundingClientRect();
+  const px = st.x(pts[i].t);
+  const left = rT.left - base.left + px;
+
+  const cursor = $("cursor");
+  cursor.style.left = `${left}px`;
+  cursor.hidden = false;
+  const dT = $("cursor-temp"), dH = $("cursor-hum");
+  dT.style.left = dH.style.left = `${left}px`;
+  dT.style.top = `${rT.top - base.top + st.y(pts[i].v)}px`;
+  dH.style.top = `${rH.top - base.top + sh.y(sh.pts[i].v)}px`;
+  dT.hidden = dH.hidden = false;
+
+  const pT = st.pts[i], pH = sh.pts[i];
+  const rangeTxt = (p, d, suf) => (p.lo != null ? ` <span class="t">(${fmt(p.lo, d)}–${fmt(p.hi, d)}${suf})</span>` : "");
+  const when = state.range === "7d" ? `${dayStr(pT.t)}, ${timeStr(pT.t - bucket / 2)}–${timeStr(pT.t + bucket / 2)}`
+    : state.range === "24h" ? `${timeStr(pT.t - bucket / 2)}–${timeStr(pT.t + bucket / 2)}` : timeStr(pT.t);
+  const tip = $("tooltip");
+  tip.innerHTML =
+    `<span class="t">${when}${state.range !== "1h" ? " · average" : ""}</span>` +
+    `<span class="r"><span style="color: var(--temp)">Temperature</span><b class="num">${fmt(pT.v)}°${rangeTxt(pT, 1, "°")}</b></span>` +
+    `<span class="r"><span style="color: var(--hum)">Humidity</span><b class="num">${fmt(pH.v, 0)}%${rangeTxt(pH, 0, "%")}</b></span>`;
+  tip.hidden = false;
+  const tw = tip.offsetWidth;
+  const flip = left + 14 + tw > charts.clientWidth;
+  tip.style.left = `${flip ? left - 14 - tw : left + 14}px`;
+  tip.style.top = `${rT.top - base.top + 4}px`;
+}
+function hideCursor() {
+  ["cursor", "cursor-temp", "cursor-hum", "tooltip"].forEach((id) => ($(id).hidden = true));
+}
+
+$("charts").addEventListener("pointermove", (e) => {
+  const st = scales.temp;
+  if (!st) return;
+  const r = $("chart-temp").getBoundingClientRect();
+  const px = e.clientX - r.left;
+  if (px < st.m.l || px > st.m.l + st.iw) { hoverT = null; return hideCursor(); }
+  const s = RANGES[state.range];
+  const t1 = Date.now(), t0 = t1 - s.span;
+  hoverT = t0 + ((px - st.m.l) / st.iw) * (t1 - t0);
+  showCursor(hoverT);
+});
+$("charts").addEventListener("pointerleave", () => { hoverT = null; hideCursor(); });
+
+/* ---------- Controls ---------- */
+
+function bindSeg(groupId, attr, apply) {
+  const group = $(groupId);
+  group.addEventListener("click", (e) => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    group.querySelectorAll("button").forEach((x) => x.setAttribute("aria-pressed", String(x === b)));
+    apply(b.dataset[attr]);
+  });
+}
+function pressed(groupId, attr, value) {
+  $(groupId).querySelectorAll("button").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset[attr] === value)));
+}
+
+bindSeg("unit", "unit", (u) => { state.unit = u; store.set("unit", u); render(); });
+bindSeg("range", "range", (r) => { state.range = r; store.set("range", r); hoverT = null; hideCursor(); render(); });
+pressed("unit", "unit", state.unit);
+pressed("range", "range", state.range);
+
+state.openedAt = Date.now();
+setBrokerText();
+render();
+connectBroker();
+// Redraw every few seconds so "x s ago", the offline state and the chart's time axis stay current
+// even when no message arrives (that silence is how a dead sensor shows up).
+setInterval(render, CFG.intervalSec * 1000);
+setInterval(() => {
+  if (state.history.length && !isOffline()) $("live-text").innerHTML = `<b>Live</b> · updated ${ago(Date.now() - lastSeen())}`;
+}, 1000);
+new ResizeObserver(() => render()).observe($("charts"));
+</script>
