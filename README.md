@@ -121,16 +121,37 @@ Override it with the `IOT_DB_DSN` environment variable (for example when Postgre
 
 Sketch: `esp32_mqtt/esp32_mqtt.ino`. In the Arduino IDE install the libraries **PubSubClient**
 (Nick O'Leary), **DHT sensor library** (Adafruit) and **Adafruit Unified Sensor**.
-Board: *ESP32 Dev Module*. At the top of the sketch set:
+Board: *ESP32 Dev Module*.
+
+**Create `config.h` first.** The Wi-Fi name, Wi-Fi password and broker IP are not in the sketch: they are
+read from `esp32_mqtt/config.h`, which is not in the repository (it is listed in `.gitignore`). Without it
+the sketch stops with `Missing config.h`. Copy the template in the same folder:
+
+```
+cd esp32_mqtt
+copy config.example.h config.h
+```
+
+(macOS: `cp config.example.h config.h`). Open `config.h` and fill in:
+
+```cpp
+const char* WIFI_SSID     = "YOUR_WIFI_NAME";        // 2.4 GHz network only
+const char* WIFI_PASSWORD = "YOUR_WIFI_PASSWORD";
+const char* MQTT_HOST     = "192.168.x.x";           // IPv4 of the computer running Mosquitto (run ipconfig)
+```
 
 - `WIFI_SSID` / `WIFI_PASSWORD` — a **2.4 GHz** network
 - `MQTT_HOST` — the IPv4 address of the computer running Mosquitto (`ipconfig`), on that same network
+
+Reopen the sketch in the Arduino IDE: `config.h` should appear as a second tab next to `esp32_mqtt.ino`.
+At the top of the sketch itself set:
+
 - `DEVICE_ID` — must be unique for every ESP32
 - `DHTPIN` (4) and `DHTTYPE` (DHT11)
 
 Then **Upload** (hold the **IO0** button while it says "Connecting…"). The values are stored inside the
 board's program, so after changing them the sketch must be uploaded again. The EN button only restarts the
-board. Do not share or commit the sketch with the real Wi-Fi password in it.
+board. Never commit `config.h` or share it: it contains the real Wi-Fi password.
 
 Wiring (DHT11 module): `S` → GPIO 4, middle pin → 3V3, other end → GND. Never use GPIO 0 for the data pin.
 
