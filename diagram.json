@@ -1,0 +1,43 @@
+{
+  "title": "ESP32 + DHT11 temperature and humidity sensor",
+  "author": "Erin Su Öz, Ömer Altan Ünal",
+  "parts": [
+    {
+      "id": "esp32",
+      "name": "ESP32-WROOM-32 development board",
+      "arduino_board": "ESP32 Dev Module",
+      "power": "USB cable to a computer or a USB wall adapter"
+    },
+    {
+      "id": "dht11",
+      "name": "DHT11 temperature and humidity sensor, 3-pin module",
+      "pins": ["S", "VCC", "GND"],
+      "pin_order": "Seen from the front (the side with the blue sensor): S on one end, VCC in the middle, GND on the other end"
+    }
+  ],
+  "connections": [
+    {
+      "from": "dht11.S",
+      "to": "esp32.GPIO4",
+      "signal": "data",
+      "note": "This is the pin next to the S on the front of the Sensor & GPIO 4 is printed as D4 or 4 on the board"
+    },
+    {
+      "from": "dht11.VCC",
+      "to": "esp32.3V3",
+      "signal": "power, 3.3 V",
+      "note": "Use 3V3, not VIN or 5V"
+    },
+    {
+      "from": "dht11.GND",
+      "to": "esp32.GND",
+      "signal": "ground",
+      "note": "Any GND pin works; GND is the module pin at the opposite end from S"
+    }
+  ],
+  "notes": [
+    "The module already has the pull-up resistor the data line needs, so no extra parts are required.",
+    "Do not use GPIO 0 for the data line: it is the boot pin and can stop the board from starting or from accepting uploads.",
+    "Unplug the USB cable before changing any wiring."
+  ]
+}
