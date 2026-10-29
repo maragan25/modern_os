@@ -1,0 +1,4 @@
+# Python libraries for subscriber.py (MQTT -> PostgreSQL)
+# Install with:  pip install -r requirements.txt
+paho-mqtt>=2.0
+psycopg[binary]>=3.1

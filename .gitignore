@@ -1,0 +1,10 @@
+# Private settings (Wi-Fi password, broker IP) - copy esp32_mqtt/config.example.h to config.h
+esp32_mqtt/config.h
+
+# Python virtual environment: contains paths to the computer that created it
+.venv/
+
+# macOS / Python junk
+.DS_Store
+__pycache__/
+*.pyc

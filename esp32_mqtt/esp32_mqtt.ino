@@ -2,10 +2,15 @@
 #include <PubSubClient.h>
 #include <DHT.h>
 
+// Wi-Fi name, Wi-Fi password and the broker's IP live in config.h, which is not committed.
+// If this fails to compile: copy config.example.h to config.h and fill it in.
+#if __has_include("config.h")
+#include "config.h"
+#else
+#error "Missing config.h: copy esp32_mqtt/config.example.h to esp32_mqtt/config.h and fill in your Wi-Fi name, password and the broker IP."
+#endif
+
 // ---------- Change these ----------
-const char* WIFI_SSID     = "placeholder";
-const char* WIFI_PASSWORD = "placeholder";
-const char* MQTT_HOST     = "192.168.x.x";  // IP of the computer running Mosquitto
 const int   MQTT_PORT     = 1883;
 const char* DEVICE_ID     = "esp32-room1";
 
