@@ -28,15 +28,60 @@ char topic[64];
 unsigned long lastRead = 0;
 unsigned long readingCount = 0;
 
-void connectWiFi() {
-  Serial.printf("Connecting to WiFi '%s'", WIFI_SSID);
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
+const unsigned long WIFI_TIMEOUT_MS = 20000;  // give up on one attempt after 20 s, then scan and retry
+
+const char* wifiStatusText(int s) {
+  switch (s) {
+    case WL_IDLE_STATUS:     return "still trying";
+    case WL_NO_SSID_AVAIL:   return "network not found (wrong name, 5 GHz only, hidden, or out of range)";
+    case WL_CONNECT_FAILED:  return "connection refused (wrong password, WPA3-only, or the access point rejected it)";
+    case WL_CONNECTION_LOST: return "connection lost";
+    case WL_DISCONNECTED:    return "not connected (no answer from the access point)";
+    default:                 return "unknown";
   }
-  Serial.printf("\nWiFi connected, ESP32 IP: %s\n", WiFi.localIP().toString().c_str());
+}
+
+// Lists every network the ESP32 can see. If yours is missing, it is a band/visibility problem.
+void scanNetworks() {
+  Serial.println("Scanning for WiFi networks ...");
+  int n = WiFi.scanNetworks();
+  if (n <= 0) {
+    Serial.println("  no networks found at all (antenna/power problem, or nothing on 2.4 GHz nearby)");
+    return;
+  }
+  bool found = false;
+  for (int i = 0; i < n; i++) {
+    bool match = (WiFi.SSID(i) == WIFI_SSID);
+    if (match) found = true;
+    Serial.printf("  %s %-32s ch %2d  %4d dBm\n", match ? "*" : " ", WiFi.SSID(i).c_str(), WiFi.channel(i), WiFi.RSSI(i));
+  }
+  if (found) {
+    Serial.println("  (* = the network from config.h)");
+  } else {
+    Serial.printf("  '%s' is NOT in this list: the ESP32 cannot see it. Check 2.4 GHz, the name, and that it is not hidden.\n", WIFI_SSID);
+  }
+  WiFi.scanDelete();
+}
+
+void connectWiFi() {
+  WiFi.mode(WIFI_STA);
+  while (WiFi.status() != WL_CONNECTED) {
+    scanNetworks();
+    Serial.printf("Connecting to WiFi '%s' ", WIFI_SSID);
+    WiFi.disconnect();
+    WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+    unsigned long start = millis();
+    while (WiFi.status() != WL_CONNECTED && millis() - start < WIFI_TIMEOUT_MS) {
+      delay(500);
+      Serial.print(".");
+    }
+    Serial.println();
+    if (WiFi.status() != WL_CONNECTED) {
+      int s = WiFi.status();
+      Serial.printf("  failed after %lu s: %s (status %d). Retrying ...\n\n", WIFI_TIMEOUT_MS / 1000, wifiStatusText(s), s);
+    }
+  }
+  Serial.printf("WiFi connected, ESP32 IP: %s, signal %d dBm\n", WiFi.localIP().toString().c_str(), WiFi.RSSI());
 }
 
 void connectMQTT() {

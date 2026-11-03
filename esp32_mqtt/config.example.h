@@ -1,4 +1,4 @@
-#pragma once
+    #pragma once
 // Template for config.h. Copy this file to config.h (same folder) and fill in your values.
 // config.h is listed in .gitignore, so your Wi-Fi password and IP address are never committed.
 
