@@ -159,8 +159,13 @@ Wiring (DHT11 module): `S` → GPIO 4, middle pin → 3V3, other end → GND. Ne
 
 Open `dashboard/index.html` on the computer running Mosquitto. The banner at the top should say
 **connected**. From another device, add the broker address: `index.html?broker=ws://<computer-ip>:9001`.
-It shows one device (`esp32-room1`); use `?device=<DEVICE_ID>` for another. History is only kept while the page
-is open; reading stored history from the database needs a small HTTP API that is not built yet.
+At the top is a rotatable 3D floor plan (3 floors, 16 rooms, each with a unique id such as `G01`).
+The dashboard subscribes to `sensors/+/data` and shows each reading in the room whose `device` matches
+the ESP32's `DEVICE_ID`. Only the living room (`G01` → `esp32-room1`) has a sensor so far; to add one,
+flash an ESP32 with a new `DEVICE_ID` and set it as that room's `device` in the `ROOMS` list in
+`dashboard/index.html`. Devices that are not in the list are named in the bar at the top.
+History is only kept while the page is open; reading stored history from the database needs a small
+HTTP API that is not built yet.
 `index.mockup.html` is the original mockup with simulated data.
 
 ## Checking that everything is running

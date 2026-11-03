@@ -294,12 +294,12 @@ dl.facts code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-siz
       <div class="building-body">
         <div class="stage" id="stage" tabindex="0" role="img" aria-label="3D floor plan">
           <canvas id="plan"></canvas>
-          <p class="stage-hint">Drag to rotate · click a room</p>
+          <p class="stage-hint">Drag or swipe sideways to rotate · scroll to change floor · click a room</p>
           <div class="stage-tools">
             <button type="button" class="icon-btn" id="rot-left" aria-label="Rotate left" title="Rotate left"><svg viewBox="0 0 16 16"><path d="M3.2 8a4.8 4.8 0 1 0 1.4-3.4"/><path d="M3.5 2.2v2.6h2.6"/></svg></button>
             <button type="button" class="icon-btn" id="rot-right" aria-label="Rotate right" title="Rotate right"><svg viewBox="0 0 16 16"><path d="M12.8 8a4.8 4.8 0 1 1-1.4-3.4"/><path d="M12.5 2.2v2.6H9.9"/></svg></button>
             <button type="button" class="icon-btn" id="top-view" aria-label="Top view" title="Top view" aria-pressed="false"><svg viewBox="0 0 16 16"><rect x="2.5" y="2.5" width="11" height="11" rx="1.5"/><path d="M2.5 8.5h6v5M8.5 2.5v6"/></svg></button>
-            <button type="button" class="icon-btn" id="auto-spin" aria-label="Auto-rotate" title="Auto-rotate" aria-pressed="true"><svg viewBox="0 0 16 16"><ellipse cx="8" cy="9" rx="6" ry="2.6"/><path d="M8 2.5v6.5"/><path d="m12.4 5.6 1.6.9-1.4 1.2"/></svg></button>
+            <button type="button" class="icon-btn" id="auto-spin" aria-label="Auto-rotate" title="Auto-rotate" aria-pressed="false"><svg viewBox="0 0 16 16"><ellipse cx="8" cy="9" rx="6" ry="2.6"/><path d="M8 2.5v6.5"/><path d="m12.4 5.6 1.6.9-1.4 1.2"/></svg></button>
           </div>
           <div class="tooltip" id="stage-tip" hidden></div>
         </div>
@@ -979,12 +979,17 @@ function renderRooms() {
   }
   const total = ROOMS.length, bad = ROOMS.filter((r) => roomStatus(r) !== "ok").length;
   $("building-eyebrow").textContent = `Room climate · ${FLOORS.length} floors, ${total} rooms` + (bad ? ` · ${bad} need attention` : "");
-  $("stage").setAttribute("aria-label", `3D floor plan of the ${FLOOR[state.floor].name.toLowerCase()}. ${$("rooms-summary").textContent}. Choose a room from the list.`);
+  $("stage").setAttribute("aria-label", `3D floor plan of the ${FLOOR[state.floor].name.toLowerCase()}. ${$("rooms-summary").textContent}. Arrow keys rotate, Page Up and Page Down change floor; choose a room from the list.`);
 }
 
 function selectRoom(id) {
   const room = ROOM[id];
   if (!room) return;
+  if (room.floor !== state.floor) {   // the room under the mouse is on the old floor
+    view.hover = null;
+    $("stage").classList.remove("over-room");
+    showStageTip(null);
+  }
   state.room = id;
   state.floor = room.floor;
   store.set("room", id);
@@ -992,6 +997,16 @@ function selectRoom(id) {
   pressed("mode", "mode", room.mode);
   hoverT = null; hideCursor();
   render();
+}
+
+// the floor `dir` levels above (1) or below (-1) the current one, if there is one
+function floorAt(dir) {
+  const level = FLOOR[state.floor].level + dir;
+  return FLOORS.find((f) => f.level === level) ?? null;
+}
+function stepFloor(dir) {
+  const f = floorAt(dir);
+  if (f) selectFloor(f.id);
 }
 
 function selectFloor(fid) {
@@ -1012,7 +1027,7 @@ const FONT = getComputedStyle(document.body).fontFamily;
 const view = {
   yaw: -0.65, pitch: 0.92,       // radians: rotation around the building, and angle above the horizon
   yawTo: null, pitchTo: null,    // targets for button / keyboard rotation, eased each frame
-  auto: !reduceMotion,           // slow spin until someone interacts
+  auto: false,                   // slow spin, only when the auto-rotate button is on
   zCam: FLOOR[state.floor].level * LEVEL_GAP,
   floors: Object.fromEntries(FLOORS.map((f) => [f.id, { lift: reduceMotion ? 0 : 7 + f.level * 2, alpha: 0 }])),
   wallH: Object.fromEntries(ROOMS.map((r) => [r.id, reduceMotion ? 1 : 0])),
@@ -1098,19 +1113,32 @@ function roundRect(ctx, x, y, w, h, r) {
   ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
 }
 
+// A rounded label; with o.title it gets a second, smaller line above the value (the room name).
 function pill(ctx, cx, bottom, text, o) {
-  ctx.font = `${o.bold ? 600 : 500} ${o.size}px ${FONT}`;
+  const font = `${o.bold ? 600 : 500} ${o.size}px ${FONT}`, titleFont = `500 ${o.size - 1}px ${FONT}`;
+  ctx.font = font;
   const tw = ctx.measureText(text).width, dotW = o.dot ? 11 : 0;
-  const w = Math.ceil(tw + 16 + dotW), h = o.size + 11, x = Math.round(cx - w / 2), y = Math.round(bottom - h);
+  ctx.font = titleFont;
+  const ttw = o.title ? ctx.measureText(o.title).width : 0;
+  const lineH = o.size + 11, titleH = o.title ? o.size + 1 : 0;
+  const w = Math.ceil(Math.max(tw + dotW, ttw) + 16), h = lineH + titleH;
+  const x = Math.round(cx - w / 2), y = Math.round(bottom - h), r = Math.min(h / 2, 10);
   ctx.save();
   ctx.shadowColor = "rgba(0, 0, 0, 0.12)"; ctx.shadowBlur = 6; ctx.shadowOffsetY = 2;
-  roundRect(ctx, x, y, w, h, h / 2);
+  roundRect(ctx, x, y, w, h, r);
   ctx.fillStyle = o.bg; ctx.fill();
   ctx.restore();
-  if (o.border) { roundRect(ctx, x + 0.5, y + 0.5, w - 1, h - 1, h / 2); ctx.strokeStyle = o.border; ctx.lineWidth = 1; ctx.stroke(); }
-  if (o.dot) { ctx.beginPath(); ctx.arc(x + 11, y + h / 2, 3.5, 0, 2 * Math.PI); ctx.fillStyle = o.dot; ctx.fill(); }
-  ctx.fillStyle = o.fg; ctx.textBaseline = "middle";
-  ctx.fillText(text, x + 8 + dotW, y + h / 2 + 0.5);
+  if (o.border) { roundRect(ctx, x + 0.5, y + 0.5, w - 1, h - 1, r); ctx.strokeStyle = o.border; ctx.lineWidth = 1; ctx.stroke(); }
+  ctx.textBaseline = "middle";
+  if (o.title) {
+    ctx.font = titleFont; ctx.fillStyle = o.titleFg ?? o.fg; ctx.textAlign = "center";
+    ctx.fillText(o.title, x + w / 2, y + 4 + (o.size - 1) / 2 + 0.5);
+    ctx.textAlign = "left";
+  }
+  const vx = x + (w - tw - dotW) / 2, vy = y + titleH + lineH / 2;   // value line, centred under the title
+  if (o.dot) { ctx.beginPath(); ctx.arc(vx + 3.5, vy, 3.5, 0, 2 * Math.PI); ctx.fillStyle = o.dot; ctx.fill(); }
+  ctx.font = font; ctx.fillStyle = o.fg;
+  ctx.fillText(text, vx + dotW, vy + 0.5);
   return [x, y, w, h];
 }
 
@@ -1210,7 +1238,7 @@ function drawPlan(time) {
       const rect = pill(ctx, anchor[0], anchor[1] - lift, `${r.name}  ${vals}`, { size: 12, bold: true, bg: rgb(P.btn), fg: rgb(P.btnFg), dot: rgb(P[s]) });
       view.labels.push({ id: r.id, rect });
     } else {
-      const rect = pill(ctx, anchor[0], anchor[1], s === "off" ? "Offline" : tempStr(cur.temp), { size: 11, bg: rgb(P.card), fg: rgb(P.ink), border: rgb(P.border), dot: rgb(P[s]) });
+      const rect = pill(ctx, anchor[0], anchor[1], s === "off" ? "Offline" : tempStr(cur.temp), { size: 11, bold: true, title: r.name, titleFg: rgb(P.body), bg: rgb(P.card), fg: rgb(P.ink), border: rgb(P.border), dot: rgb(P[s]) });
       view.labels.push({ id: r.id, rect });
     }
   }
@@ -1323,9 +1351,35 @@ function bindStage() {
   stage.addEventListener("keydown", (e) => {
     const k = { ArrowLeft: () => rotateBy(-Math.PI / 12), ArrowRight: () => rotateBy(Math.PI / 12),
       ArrowUp: () => { stopAuto(); view.pitchTo = clampPitch((view.pitchTo ?? view.pitch) + 0.15); },
-      ArrowDown: () => { stopAuto(); view.pitchTo = clampPitch((view.pitchTo ?? view.pitch) - 0.15); } }[e.key];
+      ArrowDown: () => { stopAuto(); view.pitchTo = clampPitch((view.pitchTo ?? view.pitch) - 0.15); },
+      PageUp: () => stepFloor(1), PageDown: () => stepFloor(-1) }[e.key];
     if (k) { e.preventDefault(); k(); }
   });
+
+  // Mouse wheel / touchpad: sideways scrolling rotates, scrolling up or down changes floor.
+  let wheelSum = 0, wheelLock = 0;
+  stage.addEventListener("wheel", (e) => {
+    if (e.ctrlKey) return;                                    // pinch-to-zoom: leave it to the browser
+    const k = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1;   // lines / pages -> pixels
+    const dx = e.deltaX * k, dy = e.deltaY * k;
+    if (Math.abs(dx) > Math.abs(dy)) {                        // two-finger swipe sideways, or Shift + wheel
+      e.preventDefault();
+      stopAuto(); view.yawTo = null;
+      view.yaw += dx * 0.006;
+      return;
+    }
+    if (!floorAt(dy < 0 ? 1 : -1)) return;                    // already on the top / bottom floor: scroll the page
+    e.preventDefault();
+    const now = performance.now();
+    // one floor per gesture: a touchpad keeps sending small events (momentum) after the fingers lift
+    if (now < wheelLock) { wheelLock = Math.max(wheelLock, now + 180); return; }
+    if (Math.sign(dy) !== Math.sign(wheelSum)) wheelSum = 0;
+    wheelSum += dy;
+    if (Math.abs(wheelSum) < 40) return;
+    wheelSum = 0;
+    wheelLock = now + 450;
+    stepFloor(dy < 0 ? 1 : -1);
+  }, { passive: false });
 
   $("rot-left").addEventListener("click", () => rotateBy(-Math.PI / 2));
   $("rot-right").addEventListener("click", () => rotateBy(Math.PI / 2));
