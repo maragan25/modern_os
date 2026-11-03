@@ -63,6 +63,7 @@
 
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
+[hidden] { display: none !important; }
 body {
   background: var(--canvas);
   color: var(--ink);
@@ -188,10 +189,58 @@ dl.facts dt { color: var(--body); }
 dl.facts dd { margin: 0; text-align: right; font-weight: 500; min-width: 0; overflow-wrap: anywhere; }
 dl.facts code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; }
 
+/* Building: 3D floor plan + room list */
+.building .card-head { margin-bottom: 16px; }
+.building-body { display: grid; grid-template-columns: minmax(0, 1fr) 290px; gap: 16px; }
+.stage { position: relative; height: 420px; border-radius: 10px; border: 1px solid var(--border); overflow: hidden;
+  background: radial-gradient(ellipse 80% 70% at 50% 42%, var(--card) 0%, var(--canvas) 100%);
+  touch-action: pan-y; cursor: grab; user-select: none; -webkit-user-select: none; }
+.stage:focus-visible { outline: 2px solid var(--hum); outline-offset: 2px; }
+.stage.dragging { cursor: grabbing; }
+.stage.over-room { cursor: pointer; }
+.stage canvas { display: block; width: 100%; height: 100%; }
+.stage-hint { position: absolute; left: 12px; bottom: 12px; margin: 0; font-size: 12px; color: var(--muted); pointer-events: none; }
+.stage-tools { position: absolute; right: 10px; bottom: 10px; display: flex; gap: 6px; }
+.icon-btn { width: 32px; height: 32px; padding: 0; display: grid; place-items: center; border-radius: var(--radius-ctl);
+  border: 1px solid var(--border); background: var(--card); color: var(--body); box-shadow: var(--shadow); }
+.icon-btn:hover { color: var(--ink); }
+.icon-btn[aria-pressed="true"] { background: var(--btn); color: var(--btn-fg); border-color: transparent; }
+.icon-btn svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.stage .tooltip { min-width: 170px; }
+.floor-seg button { display: inline-flex; align-items: center; gap: 6px; }
+.sdot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--ok); }
+.sdot[data-s="warn"] { background: var(--warn); }
+.sdot[data-s="bad"] { background: var(--bad); }
+.sdot[data-s="off"] { background: var(--off); }
+.sdot[data-s="none"] { background: transparent; box-shadow: inset 0 0 0 1.5px var(--off); }
+.floor-seg .sdot { width: 6px; height: 6px; }
+.floor-seg .sdot[data-s="ok"] { display: none; }
+
+.rooms { display: flex; flex-direction: column; min-width: 0; }
+.rooms-summary { margin: 0 0 8px; font-size: 12px; color: var(--body); }
+.room-list { display: grid; gap: 2px; align-content: start; overflow: auto; max-height: 392px; margin: 0; padding: 0; list-style: none; }
+.room-btn { width: 100%; display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px;
+  padding: 8px 10px; border: 0; border-radius: var(--radius-ctl); background: transparent; text-align: left; }
+.room-btn:hover { background: var(--chip); }
+.room-btn[aria-pressed="true"] { background: var(--chip); box-shadow: inset 3px 0 0 var(--ink); }
+.room-btn .name { display: block; font-size: 13px; font-weight: 500; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.room-btn .rid { display: block; font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 11px; color: var(--muted); margin-top: 1px; }
+.room-btn .vals { font-size: 12px; color: var(--body); text-align: right; white-space: nowrap; }
+.room-btn .vals b { color: var(--ink); font-weight: 600; }
+.status-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; margin-top: 12px; font-size: 12px; color: var(--body); }
+.status-legend span { display: inline-flex; align-items: center; gap: 6px; }
+
+/* Selected room heading */
+.room-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 12px 16px; padding-top: 8px; }
+.room-head h2 { font-family: var(--font-num); font-weight: 400; font-size: 36px; line-height: 1; margin: 0; }
+.room-head .eyebrow code { font-family: ui-monospace, "SF Mono", Menlo, monospace; letter-spacing: 0; }
+
 @media (max-width: 960px) {
   .summary { grid-template-columns: 1fr 1fr; }
   .verdict { grid-column: 1 / -1; }
   .bottom { grid-template-columns: 1fr; }
+  .building-body { grid-template-columns: 1fr; }
+  .room-list { grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); max-height: none; }
 }
 @media (max-width: 560px) {
   h1 { font-size: 36px; }
@@ -201,6 +250,11 @@ dl.facts code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-siz
   .card { padding: 18px; }
   .today-grid { grid-template-columns: 1fr 1fr; row-gap: 18px; }
   .stat:nth-child(3) { padding-left: 0; border-left: 0; }
+  .stage { height: 320px; }
+  .floor-seg { width: 100%; }
+  .floor-seg button { flex: 1; justify-content: center; white-space: nowrap; padding-inline: 6px; font-size: 12px; }
+  .stage-hint { display: none; }
+  .room-head h2 { font-size: 30px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .pill[data-s="live"] .dot { animation: none; }
@@ -218,11 +272,10 @@ dl.facts code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-siz
 <div class="wrap">
   <header class="top">
     <div>
-      <p class="eyebrow">Room climate</p>
-      <h1>Living room</h1>
+      <p class="eyebrow" id="building-eyebrow">Room climate</p>
+      <h1>Home</h1>
     </div>
     <div class="top-right">
-      <span class="pill" id="live-pill" data-s="live"><span class="dot"></span><span id="live-text"><b>Live</b> · updated just now</span></span>
       <div class="seg" role="group" aria-label="Temperature unit" id="unit">
         <button type="button" id="unit-c" data-unit="C" aria-pressed="true">°C</button>
         <button type="button" id="unit-f" data-unit="F" aria-pressed="false">°F</button>
@@ -231,6 +284,45 @@ dl.facts code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-siz
   </header>
 
   <main>
+    <section class="card building">
+      <div class="card-head">
+        <h2>Floor plan</h2>
+        <div class="seg floor-seg" role="group" aria-label="Floor" id="floor"></div>
+      </div>
+      <div class="building-body">
+        <div class="stage" id="stage" tabindex="0" role="img" aria-label="3D floor plan">
+          <canvas id="plan"></canvas>
+          <p class="stage-hint">Drag to rotate · click a room</p>
+          <div class="stage-tools">
+            <button type="button" class="icon-btn" id="rot-left" aria-label="Rotate left" title="Rotate left"><svg viewBox="0 0 16 16"><path d="M3.2 8a4.8 4.8 0 1 0 1.4-3.4"/><path d="M3.5 2.2v2.6h2.6"/></svg></button>
+            <button type="button" class="icon-btn" id="rot-right" aria-label="Rotate right" title="Rotate right"><svg viewBox="0 0 16 16"><path d="M12.8 8a4.8 4.8 0 1 1-1.4-3.4"/><path d="M12.5 2.2v2.6H9.9"/></svg></button>
+            <button type="button" class="icon-btn" id="top-view" aria-label="Top view" title="Top view" aria-pressed="false"><svg viewBox="0 0 16 16"><rect x="2.5" y="2.5" width="11" height="11" rx="1.5"/><path d="M2.5 8.5h6v5M8.5 2.5v6"/></svg></button>
+            <button type="button" class="icon-btn" id="auto-spin" aria-label="Auto-rotate" title="Auto-rotate" aria-pressed="true"><svg viewBox="0 0 16 16"><ellipse cx="8" cy="9" rx="6" ry="2.6"/><path d="M8 2.5v6.5"/><path d="m12.4 5.6 1.6.9-1.4 1.2"/></svg></button>
+          </div>
+          <div class="tooltip" id="stage-tip" hidden></div>
+        </div>
+        <div class="rooms">
+          <p class="rooms-summary" id="rooms-summary"></p>
+          <ul class="room-list" id="room-list" aria-label="Rooms on this floor"></ul>
+          <div class="status-legend" aria-hidden="true">
+            <span><i class="sdot" data-s="ok"></i>Comfortable</span>
+            <span><i class="sdot" data-s="warn"></i>Needs attention</span>
+            <span><i class="sdot" data-s="bad"></i>Act now</span>
+            <span><i class="sdot" data-s="off"></i>Offline</span>
+            <span><i class="sdot" data-s="none"></i>No sensor</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="room-head">
+      <div>
+        <p class="eyebrow" id="room-eyebrow">Room</p>
+        <h2 id="room-name">–</h2>
+      </div>
+      <span class="pill" id="live-pill" data-s="live"><span class="dot"></span><span id="live-text"><b>Live</b> · updated just now</span></span>
+    </div>
+
     <section class="summary">
       <article class="card verdict" aria-live="polite">
         <div class="card-head">
@@ -319,7 +411,6 @@ dl.facts code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-siz
 const params = new URLSearchParams(location.search);
 const CFG = {
   broker: params.get("broker") || `ws://${location.hostname || "localhost"}:9001`,
-  device: params.get("device") || "esp32-room1",
   sensor: "DHT11",
   pin: 4,
   intervalSec: 5,       // must match READ_INTERVAL_MS in the ESP32 sketch
@@ -328,7 +419,8 @@ const CFG = {
   maxHistoryDays: 7,
   comfort: { tMin: 20, tMax: 26, hMin: 30, hMax: 60 },
 };
-const TOPIC = `sensors/${CFG.device}/data`;
+// One subscription for every sensor; each message is matched to a room by its device id.
+const TOPIC = "sensors/+/data";
 
 const MIN = 60e3, HOUR = 60 * MIN, DAY = 24 * HOUR;
 const RANGES = {
@@ -337,20 +429,64 @@ const RANGES = {
   "7d":  { span: 7 * DAY,  bucket: HOUR },
 };
 
+/* ---------- Building ---------- */
+
+// Floors from the bottom up; level sets the stacking order in the 3D view.
+const FLOORS = [
+  { id: "B", name: "Basement", level: 0 },
+  { id: "G", name: "Ground floor", level: 1 },
+  { id: "F", name: "First floor", level: 2 },
+];
+const BUILDING = { w: 15, d: 10 };   // footprint in metres
+
+// Every room has a unique id (floor letter + number). rect = [x, y, width, depth] in metres.
+// device is the DEVICE_ID of the room's ESP32 (it publishes to sensors/<device>/data);
+// rooms without one are shown as "No sensor". To add a sensor: flash an ESP32 with a new
+// DEVICE_ID and put that id here.
+const ROOMS = [
+  { id: "B01", floor: "B", name: "Garage",       rect: [0, 0, 9, 10] },
+  { id: "B02", floor: "B", name: "Storage",      rect: [9, 0, 6, 5] },
+  { id: "B03", floor: "B", name: "Boiler room",  rect: [9, 5, 6, 5] },
+  { id: "G01", floor: "G", name: "Living room",  rect: [0, 0, 7, 6],   device: "esp32-room1" },
+  { id: "G02", floor: "G", name: "Kitchen",      rect: [7, 0, 4, 6] },
+  { id: "G03", floor: "G", name: "Dining room",  rect: [11, 0, 4, 6] },
+  { id: "G04", floor: "G", name: "Study",        rect: [0, 6, 5, 4] },
+  { id: "G05", floor: "G", name: "Hallway",      rect: [5, 6, 4, 4] },
+  { id: "G06", floor: "G", name: "Guest WC",     rect: [9, 6, 2, 4] },
+  { id: "G07", floor: "G", name: "Utility room", rect: [11, 6, 4, 4] },
+  { id: "F01", floor: "F", name: "Bedroom",      rect: [0, 0, 6, 6] },
+  { id: "F02", floor: "F", name: "Bathroom",     rect: [6, 0, 4, 5] },
+  { id: "F03", floor: "F", name: "Kids' room",   rect: [10, 0, 5, 5] },
+  { id: "F04", floor: "F", name: "Landing",      rect: [6, 5, 4, 5] },
+  { id: "F05", floor: "F", name: "Office",       rect: [0, 6, 6, 4] },
+  { id: "F06", floor: "F", name: "Guest room",   rect: [10, 5, 5, 5] },
+];
+// ?device=<id> points the living room at another ESP32, as before
+if (params.get("device")) ROOMS.find((r) => r.id === "G01").device = params.get("device");
+for (const r of ROOMS) Object.assign(r, { history: [], lastTick: null });   // one entry per MQTT message
+const ROOM = Object.fromEntries(ROOMS.map((r) => [r.id, r]));
+const FLOOR = Object.fromEntries(FLOORS.map((f) => [f.id, f]));
+const BY_DEVICE = Object.fromEntries(ROOMS.filter((r) => r.device).map((r) => [r.device, r]));
+const roomsOn = (floorId) => ROOMS.filter((r) => r.floor === floorId);
+
 const $ = (id) => document.getElementById(id);
 const store = {
   get(k) { try { return localStorage.getItem(k); } catch { return null; } },
   set(k, v) { try { localStorage.setItem(k, v); } catch {} },
 };
+const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
+const startRoom = ROOM[location.hash.slice(1)] ?? ROOM[store.get("room")] ?? ROOM.G01;
 const state = {
   unit: store.get("unit") === "F" ? "F" : "C",
   range: RANGES[store.get("range")] ? store.get("range") : "24h",
-  history: [],          // { t, temp, hum } — one entry per MQTT message
-  lastTick: null,       // time the last reading arrived
+  room: startRoom.id,
+  floor: startRoom.floor,
+  unknown: new Set(),   // device ids that sent data but are not in ROOMS
   conn: "connecting",   // broker connection: connecting | connected | reconnecting | error
   connError: "",
 };
+const sel = () => ROOM[state.room];
 
 /* ---------- Live data from the MQTT broker (MQTT over WebSockets) ---------- */
 
@@ -361,19 +497,27 @@ function setBrokerText() {
     reconnecting: "connection lost, retrying…",
     error: `error: ${state.connError}`,
   }[state.conn];
-  $("broker-text").innerHTML = `MQTT broker <code>${CFG.broker}</code> · <b>${label}</b> · topic <code>${TOPIC}</code>`;
+  const unknown = state.unknown.size
+    ? ` · not in the room list: <code>${[...state.unknown].join("</code>, <code>")}</code>` : "";
+  $("broker-text").innerHTML = `MQTT broker <code>${CFG.broker}</code> · <b>${label}</b> · topic <code>${TOPIC}</code>${unknown}`;
 }
 
-function onReading(payload) {
+function onReading(topic, payload) {
+  const device = topic.split("/")[1];
+  const room = BY_DEVICE[device];
+  if (!room) {
+    if (!state.unknown.has(device)) { state.unknown.add(device); setBrokerText(); }
+    return;
+  }
   let data;
   try { data = JSON.parse(payload); } catch { return console.warn("Not JSON:", payload); }
   const temp = Number(data.temperature), hum = Number(data.humidity);
   if (!isFinite(temp) || !isFinite(hum)) return console.warn("Missing values:", data);
   const t = Date.now();
-  state.history.push({ t, temp, hum });
+  room.history.push({ t, temp, hum });
   const cut = t - CFG.maxHistoryDays * DAY;
-  while (state.history.length && state.history[0].t < cut) state.history.shift();
-  state.lastTick = t;
+  while (room.history.length && room.history[0].t < cut) room.history.shift();
+  room.lastTick = t;
   render();
 }
 
@@ -396,14 +540,15 @@ function connectBroker() {
   client.on("reconnect", () => { state.conn = "reconnecting"; setBrokerText(); });
   client.on("close", () => { if (state.conn === "connected") { state.conn = "reconnecting"; setBrokerText(); } });
   client.on("error", (err) => { state.conn = "error"; state.connError = err.message; setBrokerText(); });
-  client.on("message", (topic, message) => { if (topic === TOPIC) onReading(message.toString()); });
+  client.on("message", (topic, message) => onReading(topic, message.toString()));
 }
 
 /* ---------- Data access ---------- */
 
-function readings() { return state.history; }
-function lastSeen() { return state.lastTick; }
-function isOffline() { return Date.now() - lastSeen() > CFG.offlineAfterSec * 1000; }
+function readings(room = sel()) { return room.history; }
+function latest(room) { return room.history[room.history.length - 1] ?? null; }
+function lastSeen(room = sel()) { return room.lastTick; }
+function isOffline(room = sel()) { return Date.now() - lastSeen(room) > CFG.offlineAfterSec * 1000; }
 
 function nearestBefore(pts, t) {
   let lo = 0, hi = pts.length - 1;
@@ -486,7 +631,19 @@ function humStatus(h) {
   if (h < hMin) return { s: "warn", label: `Below ${hMin}%`, dir: "low" };
   return { s: "ok", label: "In range" };
 }
-const RANK = { ok: 0, warn: 1, bad: 2 };
+const RANK = { none: -1, ok: 0, warn: 1, bad: 2, off: 3 };
+
+// none = no sensor in this room, off = has a sensor but no recent reading (or none yet)
+function roomStatus(room) {
+  if (!room.device) return "none";
+  if (!room.history.length || isOffline(room)) return "off";
+  const cur = latest(room);
+  const a = tempStatus(cur.temp).s, b = humStatus(cur.hum).s;
+  return RANK[a] >= RANK[b] ? a : b;
+}
+function worstOf(rooms) {
+  return rooms.map(roomStatus).reduce((a, b) => (RANK[b] > RANK[a] ? b : a), "ok");
+}
 
 function verdict(cur, offline) {
   if (offline) {
@@ -677,14 +834,17 @@ function trendText(pts, cur, key, isTemp) {
   return `<span class="arrow">→</span> Steady over the last 30 min`;
 }
 
-function renderWaiting() {
+function renderWaiting(room) {
+  const noSensor = !room.device;
   $("live-pill").dataset.s = "off";
-  $("live-text").innerHTML = `<b>Waiting</b> · no reading yet`;
-  setChip($("verdict-chip"), "off", "Waiting");
-  $("verdict-title").textContent = "Waiting for data";
-  $("verdict-text").textContent = state.conn === "connected"
-    ? `Connected to the broker. The first reading should arrive within ${CFG.intervalSec} seconds.`
-    : "Connecting to the MQTT broker. Make sure Mosquitto is running with the WebSocket listener on port 9001.";
+  $("live-text").innerHTML = noSensor ? `<b>No sensor</b> in this room` : `<b>Waiting</b> · no reading yet`;
+  setChip($("verdict-chip"), "off", noSensor ? "No sensor" : "Waiting");
+  $("verdict-title").textContent = noSensor ? "No sensor here yet" : "Waiting for data";
+  $("verdict-text").textContent = noSensor
+    ? `Flash an ESP32 with its own DEVICE_ID, then add that id to room ${room.id} in the ROOMS list in dashboard/index.html.`
+    : state.conn === "connected"
+      ? `Connected to the broker. The first reading should arrive within ${CFG.intervalSec} seconds.`
+      : "Connecting to the MQTT broker. Make sure Mosquitto is running with the WebSocket listener on port 9001.";
   $("feels").textContent = $("dew").textContent = "–";
   for (const k of ["temp", "hum"]) {
     $(`tile-${k}`).classList.add("is-off");
@@ -696,17 +856,25 @@ function renderWaiting() {
   }
   $("today").innerHTML = "";
   $("today-foot").textContent = "No readings yet.";
-  setChip($("sensor-chip"), "off", "Waiting");
+  setChip($("sensor-chip"), "off", noSensor ? "None" : "Waiting");
   const row = (k, v) => `<div><dt>${k}</dt><dd>${v}</dd></div>`;
   $("facts").innerHTML =
-    row("Device", CFG.device) +
-    row("Sensor", `${CFG.sensor} on GPIO ${CFG.pin}`) +
-    row("MQTT topic", `<code>${TOPIC}</code>`);
+    row("Room", `<code>${room.id}</code> · ${FLOOR[room.floor].name}`) +
+    (noSensor ? row("Device", "none yet") : row("Device", room.device) +
+      row("Sensor", `${CFG.sensor} on GPIO ${CFG.pin}`) +
+      row("MQTT topic", `<code>sensors/${room.device}/data</code>`));
 }
 
 function render() {
+  const room = sel();
+  // building overview + selected room heading
+  renderFloors();
+  renderRooms();
+  $("room-eyebrow").innerHTML = `${FLOOR[room.floor].name} · Room <code>${room.id}</code>`;
+  $("room-name").textContent = room.name;
+
   const pts = readings();
-  if (!pts.length) return renderWaiting();
+  if (!pts.length) return renderWaiting(room);
   const cur = pts[pts.length - 1];
   const off = isOffline();
   const now = Date.now();
@@ -788,14 +956,433 @@ function renderFacts(pts, now, off) {
     ? `${gaps.length} · ${Math.round((gaps[0][1] - gaps[0][0]) / MIN)} min at ${timeStr(gaps[0][0])}`
     : "None";
   setChip($("sensor-chip"), off ? "off" : "ok", off ? "Offline" : "Online");
+  const room = sel();
   const row = (k, v) => `<div><dt>${k}</dt><dd>${v}</dd></div>`;
   $("facts").innerHTML =
     row("Last reading", `<span class="num">${timeStr(lastSeen())}</span> · ${ago(now - lastSeen())}`) +
     row(now - state.openedAt < HOUR ? "Readings since page opened" : "Readings, last hour", `<span class="num">${gotHour} of ${expected}</span>`) +
     row("Gaps, last 24 hours", gapText) +
-    row("Device", `${CFG.device}`) +
+    row("Room", `<code>${room.id}</code> · ${FLOOR[room.floor].name}`) +
+    row("Device", `${room.device}`) +
     row("Sensor", `${CFG.sensor} on GPIO ${CFG.pin}`) +
-    row("MQTT topic", `<code>${TOPIC}</code>`);
+    row("MQTT topic", `<code>sensors/${room.device}/data</code>`);
+}
+
+/* ---------- Floor picker + room list ---------- */
+
+// Both lists are built once and then updated in place, so keyboard focus survives the 5-second refresh.
+function renderFloors() {
+  const seg = $("floor");
+  if (!seg.children.length) {
+    // top floor first, like the buttons in a lift; a dot marks floors with a room that needs attention
+    seg.innerHTML = FLOORS.slice().reverse().map((f) =>
+      `<button type="button" data-floor="${f.id}">${f.name}<i class="sdot"></i></button>`).join("");
+  }
+  for (const b of seg.children) {
+    b.setAttribute("aria-pressed", String(b.dataset.floor === state.floor));
+    b.querySelector(".sdot").dataset.s = worstOf(roomsOn(b.dataset.floor));
+  }
+}
+
+function renderRooms() {
+  const rooms = roomsOn(state.floor);
+  const flagged = rooms.filter((r) => !["ok", "none"].includes(roomStatus(r))).length;
+  $("rooms-summary").textContent = `${FLOOR[state.floor].name} · ${rooms.length} rooms` +
+    (flagged ? ` · ${flagged} need${flagged === 1 ? "s" : ""} attention` : " · all comfortable");
+  const list = $("room-list");
+  if (list.dataset.floor !== state.floor) {
+    list.dataset.floor = state.floor;
+    list.innerHTML = rooms.map((r) =>
+      `<li><button type="button" class="room-btn" data-room="${r.id}"><i class="sdot"></i>` +
+      `<span><span class="name">${r.name}</span><span class="rid">${r.id}</span></span><span class="vals"></span></button></li>`).join("");
+  }
+  for (const b of list.querySelectorAll("button")) {
+    const r = ROOM[b.dataset.room], s = roomStatus(r), cur = latest(r);
+    b.setAttribute("aria-pressed", String(r.id === state.room));
+    b.querySelector(".sdot").dataset.s = s;
+    b.querySelector(".vals").innerHTML = s === "none" || s === "off" ? statusText(r, s)
+      : `<b class="num">${tempStr(cur.temp)}</b> · <span class="num">${fmt(cur.hum, 0)}%</span>`;
+  }
+  const sensors = ROOMS.filter((r) => r.device).length;
+  const bad = ROOMS.filter((r) => !["ok", "none"].includes(roomStatus(r))).length;
+  $("building-eyebrow").textContent = `Room climate · ${FLOORS.length} floors, ${ROOMS.length} rooms, ` +
+    `${sensors} sensor${sensors === 1 ? "" : "s"}` + (bad ? ` · ${bad} need${bad === 1 ? "s" : ""} attention` : "");
+  $("stage").setAttribute("aria-label", `3D floor plan of the ${FLOOR[state.floor].name.toLowerCase()}. ${$("rooms-summary").textContent}. Choose a room from the list.`);
+}
+
+const statusText = (r, s) => (s === "none" ? "No sensor" : r.history.length ? "Offline" : "Waiting");
+
+function selectRoom(id) {
+  const room = ROOM[id];
+  if (!room) return;
+  state.room = id;
+  state.floor = room.floor;
+  store.set("room", id);
+  try { history.replaceState(null, "", `#${id}`); } catch {}   // not allowed in some sandboxed previews
+  hoverT = null; hideCursor();
+  render();
+}
+
+function selectFloor(fid) {
+  if (fid === state.floor) return;
+  // keep the room if it is on that floor, otherwise jump to the floor's first room
+  const room = roomsOn(fid)[0];
+  if (room) selectRoom(room.id);
+}
+
+/* ---------- 3D floor plan (canvas, no libraries) ---------- */
+
+const WALL_H = 1.1;     // cut-away wall height in metres, low enough to see into every room
+const WALL_T = 0.12;
+const LEVEL_GAP = 4.4;  // vertical distance between floors in the exploded view
+const SLAB = 0.3;
+const FONT = getComputedStyle(document.body).fontFamily;
+
+const view = {
+  yaw: -0.65, pitch: 0.92,       // radians: rotation around the building, and angle above the horizon
+  yawTo: null, pitchTo: null,    // targets for button / keyboard rotation, eased each frame
+  auto: !reduceMotion,           // slow spin until someone interacts
+  zCam: FLOOR[state.floor].level * LEVEL_GAP,
+  floors: Object.fromEntries(FLOORS.map((f) => [f.id, { lift: reduceMotion ? 0 : 7 + f.level * 2, alpha: 0 }])),
+  wallH: Object.fromEntries(ROOMS.map((r) => [r.id, reduceMotion ? 1 : 0])),
+  hover: null, drag: null, hits: [], labels: [], visible: true,
+};
+
+let P = null;   // palette, read from the CSS variables so light and dark mode both work
+function readPalette() {
+  const cs = getComputedStyle(document.documentElement);
+  const hex = (n) => {
+    const v = cs.getPropertyValue(n).trim().replace("#", "");
+    return [0, 2, 4].map((i) => parseInt(v.slice(i, i + 2), 16));
+  };
+  P = Object.fromEntries(["card", "canvas", "border", "ink", "body", "muted", "ok", "warn", "bad", "off", "btn", "btnFg"]
+    .map((k) => [k, hex(k === "btnFg" ? "--btn-fg" : `--${k}`)]));
+}
+const mix = (a, b, t) => a.map((v, i) => Math.round(v + (b[i] - v) * t));
+const rgb = (c, a = 1) => `rgba(${c[0]}, ${c[1]}, ${c[2]}, ${a})`;
+
+function camera(W, H) {
+  const cy = Math.cos(view.yaw), sy = Math.sin(view.yaw);
+  const sp = Math.sin(view.pitch), cp = Math.cos(view.pitch);
+  const diag = Math.hypot(BUILDING.w, BUILDING.d);
+  // fixed zoom for every rotation (sized for the diagonal), so the house doesn't pulse while it spins
+  const s = Math.min((W * 0.92) / diag, (H - 64) / (diag * sp * 0.84 + WALL_H * cp + 0.8));
+  const ox = W / 2, oy = H / 2 + 10, z0 = view.zCam;
+  const rot = (x, y) => {
+    const dx = x - BUILDING.w / 2, dy = y - BUILDING.d / 2;
+    return [dx * cy - dy * sy, dx * sy + dy * cy];
+  };
+  return {
+    p(x, y, z) {
+      const [xr, yr] = rot(x, y);
+      return [ox + s * xr, oy + s * (yr * sp - (z - z0 - WALL_H / 2) * cp)];
+    },
+    depth(x, y, z) { return rot(x, y)[1] * cp + z * sp; },
+    facing(nx, ny) { return nx * sy + ny * cy > 0; },   // vertical face turned towards the viewer
+    light(nx, ny) { return nx * cy - ny * sy; },        // -1..1, light comes from the left of the screen
+  };
+}
+
+function poly(ctx, pts, fill, stroke) {
+  ctx.beginPath();
+  pts.forEach(([x, y], i) => (i ? ctx.lineTo(x, y) : ctx.moveTo(x, y)));
+  ctx.closePath();
+  if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+  if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = 1; ctx.stroke(); }
+}
+
+function drawBox(ctx, cam, b, c) {
+  const { x0, y0, x1, y1, z0, z1 } = b;
+  const sides = [[x0, y0, x1, y0, 0, -1], [x1, y0, x1, y1, 1, 0], [x1, y1, x0, y1, 0, 1], [x0, y1, x0, y0, -1, 0]];
+  for (const [ax, ay, bx, by, nx, ny] of sides) {
+    if (!cam.facing(nx, ny)) continue;
+    const pts = [cam.p(ax, ay, z0), cam.p(bx, by, z0), cam.p(bx, by, z1), cam.p(ax, ay, z1)];
+    poly(ctx, pts, c.side(0.5 + 0.5 * cam.light(nx, ny)), c.edge);
+  }
+  poly(ctx, [cam.p(x0, y0, z1), cam.p(x1, y0, z1), cam.p(x1, y1, z1), cam.p(x0, y1, z1)], c.top, c.edge);
+}
+
+function hull(pts) {
+  const p = pts.slice().sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const cross = (o, a, b) => (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]);
+  const lo = [], up = [];
+  for (const q of p) { while (lo.length > 1 && cross(lo[lo.length - 2], lo[lo.length - 1], q) <= 0) lo.pop(); lo.push(q); }
+  for (const q of p.reverse()) { while (up.length > 1 && cross(up[up.length - 2], up[up.length - 1], q) <= 0) up.pop(); up.push(q); }
+  return lo.slice(0, -1).concat(up.slice(0, -1));
+}
+function inside(poly, x, y) {
+  let s = 0;
+  for (let i = 0; i < poly.length; i++) {
+    const [ax, ay] = poly[i], [bx, by] = poly[(i + 1) % poly.length];
+    const c = (bx - ax) * (y - ay) - (by - ay) * (x - ax);
+    if (c !== 0) { if (s === 0) s = Math.sign(c); else if (Math.sign(c) !== s) return false; }
+  }
+  return true;
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  if (ctx.roundRect) { ctx.roundRect(x, y, w, h, r); return; }
+  ctx.moveTo(x + r, y); ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
+}
+
+function pill(ctx, cx, bottom, text, o) {
+  ctx.font = `${o.bold ? 600 : 500} ${o.size}px ${FONT}`;
+  const tw = ctx.measureText(text).width, dotW = o.dot ? 11 : 0;
+  const w = Math.ceil(tw + 16 + dotW), h = o.size + 11, x = Math.round(cx - w / 2), y = Math.round(bottom - h);
+  ctx.save();
+  ctx.shadowColor = "rgba(0, 0, 0, 0.12)"; ctx.shadowBlur = 6; ctx.shadowOffsetY = 2;
+  roundRect(ctx, x, y, w, h, h / 2);
+  ctx.fillStyle = o.bg; ctx.fill();
+  ctx.restore();
+  if (o.border) { roundRect(ctx, x + 0.5, y + 0.5, w - 1, h - 1, h / 2); ctx.strokeStyle = o.border; ctx.lineWidth = 1; ctx.stroke(); }
+  if (o.dot) { ctx.beginPath(); ctx.arc(x + 11, y + h / 2, 3.5, 0, 2 * Math.PI); ctx.fillStyle = o.dot; ctx.fill(); }
+  ctx.fillStyle = o.fg; ctx.textBaseline = "middle";
+  ctx.fillText(text, x + 8 + dotW, y + h / 2 + 0.5);
+  return [x, y, w, h];
+}
+
+function drawPlan(time) {
+  const canvas = $("plan"), stage = $("stage");
+  const W = stage.clientWidth, H = stage.clientHeight, dpr = window.devicePixelRatio || 1;
+  if (canvas.width !== Math.round(W * dpr) || canvas.height !== Math.round(H * dpr)) {
+    canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
+  }
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, W, H);
+  const cam = camera(W, H);
+  const pulse = reduceMotion ? 0.5 : 0.5 + 0.5 * Math.sin(time / 420);
+  const statuses = Object.fromEntries(roomsOn(state.floor).map((r) => [r.id, roomStatus(r)]));
+  const hits = [], labels = [];
+
+  for (const f of FLOORS) {                        // bottom floor first: upper floors are drawn over it
+    const fs = view.floors[f.id];
+    if (fs.alpha < 0.01) continue;
+    const z = f.level * LEVEL_GAP + fs.lift;
+    const active = f.id === state.floor;
+    ctx.globalAlpha = fs.alpha;
+
+    // floor slab
+    drawBox(ctx, cam, { x0: 0, y0: 0, x1: BUILDING.w, y1: BUILDING.d, z0: z - SLAB, z1: z }, {
+      top: rgb(mix(P.card, P.ink, 0.05)),
+      side: (k) => rgb(mix(P.border, P.ink, 0.3 - 0.2 * k)),
+      edge: rgb(mix(P.border, P.ink, 0.12)),
+    });
+
+    // floor name next to the corner nearest the viewer
+    const corners = [[0, 0], [BUILDING.w, 0], [BUILDING.w, BUILDING.d], [0, BUILDING.d]].map(([x, y]) => cam.p(x, y, z - SLAB));
+    const near = corners.reduce((a, b) => (b[1] > a[1] ? b : a));
+    ctx.font = `500 12px ${FONT}`; ctx.fillStyle = rgb(P.muted); ctx.textAlign = "center"; ctx.textBaseline = "top";
+    ctx.fillText(f.name, near[0], near[1] + 8);
+    ctx.textAlign = "left";
+
+    const rooms = roomsOn(f.id);
+    // room floors, tinted by status on the active floor
+    for (const r of rooms) {
+      const [x, y, w, d] = r.rect;
+      const s = active ? statuses[r.id] : null;
+      const isSel = active && r.id === state.room, isHov = active && view.hover === r.id;
+      const tinted = s && s !== "none";
+      const k = isSel ? (tinted ? 0.3 + 0.12 * pulse : 0.1) : isHov ? (tinted ? 0.26 : 0.08) : tinted ? 0.15 : 0;
+      const tint = tinted ? P[s] : P.ink;
+      poly(ctx, [cam.p(x, y, z), cam.p(x + w, y, z), cam.p(x + w, y + d, z), cam.p(x, y + d, z)], rgb(mix(P.card, tint, k)), rgb(mix(P.border, P.ink, 0.08)));
+      if (isSel) {
+        const m = 0.35;   // dashed "marching" outline just inside the walls
+        poly(ctx, [cam.p(x + m, y + m, z), cam.p(x + w - m, y + m, z), cam.p(x + w - m, y + d - m, z), cam.p(x + m, y + d - m, z)]);
+        ctx.strokeStyle = rgb(s === "none" ? P.muted : P[s], 0.55 + 0.45 * pulse); ctx.lineWidth = 2; ctx.setLineDash([6, 5]);
+        ctx.lineDashOffset = reduceMotion ? 0 : -time / 60; ctx.stroke(); ctx.setLineDash([]);
+      }
+    }
+
+    // walls: a thin box along each side of every room, drawn far to near
+    const walls = [];
+    for (const r of rooms) {
+      const [x, y, w, d] = r.rect, t = WALL_T;
+      const top = z + WALL_H * (active ? 0.75 + 0.45 * view.wallH[r.id] * (r.id === state.room ? 1 : 0.55) : 0.75);
+      for (const b of [
+        { x0: x, y0: y, x1: x + w, y1: y + t }, { x0: x, y0: y + d - t, x1: x + w, y1: y + d },
+        { x0: x, y0: y + t, x1: x + t, y1: y + d - t }, { x0: x + w - t, y0: y + t, x1: x + w, y1: y + d - t },
+      ]) walls.push({ ...b, z0: z, z1: top, depth: cam.depth((b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2, z) });
+    }
+    walls.sort((a, b) => a.depth - b.depth);
+    const wallColors = {
+      top: rgb(mix(P.card, P.ink, 0.16)),
+      side: (k) => rgb(mix(P.card, P.ink, 0.03 + 0.12 * (1 - k))),
+      edge: rgb(mix(P.border, P.ink, 0.1)),
+    };
+    for (const b of walls) drawBox(ctx, cam, b, wallColors);
+
+    if (!active) continue;
+    for (const r of rooms) {
+      const [x, y, w, d] = r.rect;
+      const box = [];
+      for (const [px, py] of [[x, y], [x + w, y], [x + w, y + d], [x, y + d]]) box.push(cam.p(px, py, z), cam.p(px, py, z + WALL_H));
+      const cx = x + w / 2, cy = y + d / 2;
+      hits.push({ id: r.id, poly: hull(box), depth: cam.depth(cx, cy, z) });
+      labels.push({ r, anchor: cam.p(cx, cy, z + WALL_H + 0.25), base: cam.p(cx, cy, z), depth: cam.depth(cx, cy, z) });
+    }
+  }
+  ctx.globalAlpha = view.floors[state.floor].alpha;
+
+  // labels: one pill per room, the selected one larger and with its name
+  labels.sort((a, b) => (a.r.id === state.room) - (b.r.id === state.room) || a.depth - b.depth);
+  view.labels = [];
+  for (const { r, anchor, base } of labels) {
+    const s = statuses[r.id], cur = latest(r), isSel = r.id === state.room;
+    const noData = s === "none" || s === "off";
+    const vals = noData ? statusText(r, s) : `${tempStr(cur.temp)} · ${fmt(cur.hum, 0)}%`;
+    const dot = s === "none" ? null : rgb(P[s]);
+    if (isSel) {
+      const lift = reduceMotion ? 26 : 26 + 3 * Math.sin(time / 420);
+      ctx.beginPath(); ctx.moveTo(base[0], base[1]); ctx.lineTo(anchor[0], anchor[1] - lift + 4);
+      ctx.strokeStyle = rgb(P.ink, 0.5); ctx.lineWidth = 1.5; ctx.stroke();
+      ctx.beginPath(); ctx.arc(base[0], base[1], 3.5, 0, 2 * Math.PI); ctx.fillStyle = rgb(P.ink); ctx.fill();
+      const rect = pill(ctx, anchor[0], anchor[1] - lift, `${r.name}  ${vals}`, { size: 12, bold: true, bg: rgb(P.btn), fg: rgb(P.btnFg), dot });
+      view.labels.push({ id: r.id, rect });
+    } else {
+      const text = s === "none" ? r.id : noData ? statusText(r, s) : tempStr(cur.temp);
+      const rect = pill(ctx, anchor[0], anchor[1], text, { size: 11, bg: rgb(P.card), fg: rgb(s === "none" ? P.muted : P.ink), border: rgb(P.border), dot });
+      view.labels.push({ id: r.id, rect });
+    }
+  }
+  ctx.globalAlpha = 1;
+  view.hits = hits.sort((a, b) => b.depth - a.depth);   // nearest first
+}
+
+function hitTest(x, y) {
+  for (let i = view.labels.length - 1; i >= 0; i--) {
+    const [lx, ly, lw, lh] = view.labels[i].rect;
+    if (x >= lx && x <= lx + lw && y >= ly && y <= ly + lh) return view.labels[i].id;
+  }
+  return view.hits.find((h) => inside(h.poly, x, y))?.id ?? null;
+}
+
+function step(dt) {
+  const ease = (rate) => (reduceMotion ? 1 : 1 - Math.exp(-dt * rate));
+  const active = FLOOR[state.floor].level;
+  for (const f of FLOORS) {
+    const fs = view.floors[f.id];
+    const lift = f.level > active ? 6 : 0;                         // floors above fly up and fade out
+    const alpha = f.level === active ? 1 : f.level < active ? 0.28 : 0;
+    fs.lift += (lift - fs.lift) * ease(4);
+    fs.alpha += (alpha - fs.alpha) * ease(f.level === active ? 3.5 : 6);
+  }
+  for (const r of ROOMS) {
+    const to = r.floor === state.floor ? 1 : 0;
+    view.wallH[r.id] += (to - view.wallH[r.id]) * ease(r.id === state.room ? 5 : 3);
+  }
+  view.zCam += (active * LEVEL_GAP - view.zCam) * ease(4);
+  if (view.auto && !view.drag) view.yaw += dt * 0.14;
+  if (view.yawTo != null) {
+    view.yaw += (view.yawTo - view.yaw) * ease(7);
+    if (Math.abs(view.yawTo - view.yaw) < 0.001) view.yawTo = null;
+  }
+  if (view.pitchTo != null) {
+    view.pitch += (view.pitchTo - view.pitch) * ease(7);
+    if (Math.abs(view.pitchTo - view.pitch) < 0.001) view.pitchTo = null;
+  }
+  $("top-view").setAttribute("aria-pressed", String((view.pitchTo ?? view.pitch) > 1.35));
+}
+
+let lastFrame = performance.now();
+function frame(time) {
+  const dt = Math.min(0.05, (time - lastFrame) / 1000);
+  lastFrame = time;
+  if (view.visible) { step(dt); drawPlan(time); }
+  requestAnimationFrame(frame);
+}
+
+function stopAuto() {
+  view.auto = false;
+  $("auto-spin").setAttribute("aria-pressed", "false");
+}
+function rotateBy(rad) { stopAuto(); view.yawTo = (view.yawTo ?? view.yaw) + rad; }
+const clampPitch = (p) => Math.min(1.5, Math.max(0.42, p));
+
+function showStageTip(id, x, y) {
+  const tip = $("stage-tip");
+  if (!id) { tip.hidden = true; return; }
+  const r = ROOM[id], s = roomStatus(r), cur = latest(r);
+  tip.innerHTML = `<span class="t">${r.id} · ${FLOOR[r.floor].name}</span><b>${r.name}</b>` + (s === "none"
+    ? `<span class="t">No sensor yet</span>`
+    : s === "off" && !cur ? `<span class="t">Waiting for the first reading</span>`
+    : s === "off" ? `<span class="t">Offline · last reading ${ago(Date.now() - lastSeen(r))}</span>`
+    : `<span class="r"><span style="color: var(--temp)">Temperature</span><b class="num">${tempStr(cur.temp)}</b></span>` +
+      `<span class="r"><span style="color: var(--hum)">Humidity</span><b class="num">${fmt(cur.hum, 0)}%</b></span>`);
+  tip.hidden = false;
+  const stage = $("stage"), tw = tip.offsetWidth, th = tip.offsetHeight;
+  tip.style.left = `${Math.min(stage.clientWidth - tw - 8, x + 14)}px`;
+  tip.style.top = `${Math.max(8, Math.min(stage.clientHeight - th - 8, y + 14))}px`;
+}
+
+function bindStage() {
+  const stage = $("stage");
+  const local = (e) => { const b = stage.getBoundingClientRect(); return [e.clientX - b.left, e.clientY - b.top]; };
+  stage.addEventListener("pointerdown", (e) => {
+    if (e.target.closest("button")) return;
+    view.drag = { x: e.clientX, y: e.clientY, yaw: view.yaw, pitch: view.pitch, moved: false, touch: e.pointerType === "touch" };
+    view.yawTo = view.pitchTo = null;
+    stage.setPointerCapture(e.pointerId);
+  });
+  stage.addEventListener("pointermove", (e) => {
+    const [x, y] = local(e);
+    const d = view.drag;
+    if (d) {
+      const dx = e.clientX - d.x, dy = e.clientY - d.y;
+      if (!d.moved && Math.hypot(dx, dy) > 4) { d.moved = true; stopAuto(); stage.classList.add("dragging"); showStageTip(null); }
+      if (d.moved) {
+        view.yaw = d.yaw + dx * 0.009;
+        if (!d.touch) view.pitch = clampPitch(d.pitch + dy * 0.006);   // on touch, vertical drags scroll the page
+      }
+      return;
+    }
+    const id = hitTest(x, y);
+    view.hover = id;
+    stage.classList.toggle("over-room", !!id);
+    showStageTip(id, x, y);
+  });
+  const end = (e) => {
+    const d = view.drag;
+    view.drag = null;
+    stage.classList.remove("dragging");
+    if (d && !d.moved && e.type === "pointerup") {
+      const id = hitTest(...local(e));
+      if (id) selectRoom(id);
+    }
+  };
+  stage.addEventListener("pointerup", end);
+  stage.addEventListener("pointercancel", end);
+  stage.addEventListener("pointerleave", () => { view.hover = null; stage.classList.remove("over-room"); showStageTip(null); });
+  stage.addEventListener("keydown", (e) => {
+    const k = { ArrowLeft: () => rotateBy(-Math.PI / 12), ArrowRight: () => rotateBy(Math.PI / 12),
+      ArrowUp: () => { stopAuto(); view.pitchTo = clampPitch((view.pitchTo ?? view.pitch) + 0.15); },
+      ArrowDown: () => { stopAuto(); view.pitchTo = clampPitch((view.pitchTo ?? view.pitch) - 0.15); } }[e.key];
+    if (k) { e.preventDefault(); k(); }
+  });
+
+  $("rot-left").addEventListener("click", () => rotateBy(-Math.PI / 2));
+  $("rot-right").addEventListener("click", () => rotateBy(Math.PI / 2));
+  $("top-view").addEventListener("click", () => {
+    stopAuto();
+    view.pitchTo = (view.pitchTo ?? view.pitch) > 1.35 ? 0.92 : 1.5;
+  });
+  $("auto-spin").addEventListener("click", (e) => {
+    view.auto = !view.auto;
+    view.yawTo = null;
+    e.currentTarget.setAttribute("aria-pressed", String(view.auto));
+  });
+  if (!view.auto) $("auto-spin").setAttribute("aria-pressed", "false");
+
+  $("floor").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) selectFloor(b.dataset.floor); });
+  $("room-list").addEventListener("click", (e) => { const b = e.target.closest("button"); if (b) selectRoom(b.dataset.room); });
+
+  new IntersectionObserver(([en]) => { view.visible = en.isIntersecting; }).observe(stage);
+  readPalette();
+  matchMedia("(prefers-color-scheme: dark)").addEventListener("change", readPalette);
+  new MutationObserver(readPalette).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+  requestAnimationFrame(frame);
 }
 
 /* ---------- Hover ---------- */
@@ -881,13 +1468,14 @@ pressed("range", "range", state.range);
 
 state.openedAt = Date.now();
 setBrokerText();
+bindStage();
 render();
 connectBroker();
 // Redraw every few seconds so "x s ago", the offline state and the chart's time axis stay current
 // even when no message arrives (that silence is how a dead sensor shows up).
 setInterval(render, CFG.intervalSec * 1000);
 setInterval(() => {
-  if (state.history.length && !isOffline()) $("live-text").innerHTML = `<b>Live</b> · updated ${ago(Date.now() - lastSeen())}`;
+  if (sel().history.length && !isOffline()) $("live-text").innerHTML = `<b>Live</b> · updated ${ago(Date.now() - lastSeen())}`;
 }, 1000);
 new ResizeObserver(() => render()).observe($("charts"));
 </script>
