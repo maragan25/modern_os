@@ -12,7 +12,7 @@
 
 // ---------- Change these ----------
 const int   MQTT_PORT     = 1883;
-const char* DEVICE_ID     = "esp32-room1";
+const char* DEVICE_ID     = "A7-27";
 
 #define DHTPIN 4        // GPIO the data pin is connected to
 #define DHTTYPE DHT11   // change to DHT22 if you have the white one
