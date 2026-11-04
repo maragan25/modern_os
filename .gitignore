@@ -8,3 +8,8 @@ esp32_mqtt/config.h
 .DS_Store
 __pycache__/
 *.pyc
+
+# Vim backup, undo and swap files (config.h~ and .config.h.un~ would contain the Wi-Fi password)
+*~
+*.swp
+*.swo
