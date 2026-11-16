@@ -441,8 +441,9 @@ const BUILDING = { w: 15, d: 10 };   // footprint in metres
 
 // Every room has a unique id (floor letter + number). rect = [x, y, width, depth] in metres.
 // device is the DEVICE_ID of the room's ESP32 (it publishes to sensors/<device>/data);
-// rooms without one are shown as "No sensor". To add a sensor: flash an ESP32 with a new
-// DEVICE_ID and put that id here.
+// rooms without one are shown as "No sensor". An ESP32 whose id is not listed here is put in a
+// random free room for now (remembered by this browser, see autoPlace). To give it a fixed room,
+// put its id here; the id is printed on the serial monitor when the board starts.
 const ROOMS = [
   { id: "B01", floor: "B", name: "Garage",       rect: [0, 0, 9, 10] },
   { id: "B02", floor: "B", name: "Storage",      rect: [9, 0, 6, 5] },
@@ -476,13 +477,28 @@ const store = {
 };
 const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
+// Temporary until rooms are assigned properly: a device that is not in ROOMS gets a random free
+// room. The choice is saved in this browser so the board stays in the same room after a reload.
+const placed = (() => { try { return JSON.parse(store.get("autoRooms")) || {}; } catch { return {}; } })();
+function autoPlace(device) {
+  const free = ROOMS.filter((r) => !r.device);
+  if (!free.length) return null;
+  const room = free.find((r) => r.id === placed[device]) ?? free[Math.floor(Math.random() * free.length)];
+  room.device = device;
+  room.auto = true;
+  BY_DEVICE[device] = room;
+  placed[device] = room.id;
+  store.set("autoRooms", JSON.stringify(placed));
+  return room;
+}
+
 const startRoom = ROOM[location.hash.slice(1)] ?? ROOM[store.get("room")] ?? ROOM.G01;
 const state = {
   unit: store.get("unit") === "F" ? "F" : "C",
   range: RANGES[store.get("range")] ? store.get("range") : "24h",
   room: startRoom.id,
   floor: startRoom.floor,
-  unknown: new Set(),   // device ids that sent data but are not in ROOMS
+  unknown: new Set(),   // device ids that sent data but found no free room
   conn: "connecting",   // broker connection: connecting | connected | reconnecting | error
   connError: "",
 };
@@ -497,17 +513,24 @@ function setBrokerText() {
     reconnecting: "connection lost, retrying…",
     error: `error: ${state.connError}`,
   }[state.conn];
+  const auto = ROOMS.filter((r) => r.auto)
+    .map((r) => `<code>${r.device}</code> → ${r.name} (${r.id})`).join(", ");
   const unknown = state.unknown.size
-    ? ` · not in the room list: <code>${[...state.unknown].join("</code>, <code>")}</code>` : "";
-  $("broker-text").innerHTML = `MQTT broker <code>${CFG.broker}</code> · <b>${label}</b> · topic <code>${TOPIC}</code>${unknown}`;
+    ? ` · no free room for: <code>${[...state.unknown].join("</code>, <code>")}</code>` : "";
+  $("broker-text").innerHTML = `MQTT broker <code>${CFG.broker}</code> · <b>${label}</b> · topic <code>${TOPIC}</code>` +
+    (auto ? ` · placed automatically: ${auto}` : "") + unknown;
 }
 
 function onReading(topic, payload) {
   const device = topic.split("/")[1];
-  const room = BY_DEVICE[device];
+  let room = BY_DEVICE[device];
   if (!room) {
-    if (!state.unknown.has(device)) { state.unknown.add(device); setBrokerText(); }
-    return;
+    room = autoPlace(device);
+    if (!room) {
+      if (!state.unknown.has(device)) { state.unknown.add(device); setBrokerText(); }
+      return;
+    }
+    setBrokerText();
   }
   let data;
   try { data = JSON.parse(payload); } catch { return console.warn("Not JSON:", payload); }
@@ -963,7 +986,7 @@ function renderFacts(pts, now, off) {
     row(now - state.openedAt < HOUR ? "Readings since page opened" : "Readings, last hour", `<span class="num">${gotHour} of ${expected}</span>`) +
     row("Gaps, last 24 hours", gapText) +
     row("Room", `<code>${room.id}</code> · ${FLOOR[room.floor].name}`) +
-    row("Device", `${room.device}`) +
+    row("Device", `${room.device}` + (room.auto ? " · placed here automatically" : "")) +
     row("Sensor", `${CFG.sensor} on GPIO ${CFG.pin}`) +
     row("MQTT topic", `<code>sensors/${room.device}/data</code>`);
 }

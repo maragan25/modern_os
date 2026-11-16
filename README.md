@@ -144,10 +144,18 @@ const char* MQTT_HOST     = "192.168.x.x";           // IPv4 of the computer run
 - `MQTT_HOST` — the IPv4 address of the computer running Mosquitto (`ipconfig`), on that same network
 
 Reopen the sketch in the Arduino IDE: `config.h` should appear as a second tab next to `esp32_mqtt.ino`.
-At the top of the sketch itself set:
+At the top of the sketch itself set `DHTPIN` (4) and `DHTTYPE` (DHT11). In the Arduino IDE pick the board you
+actually have (e.g. *ESP32S3 Dev Module* for an ESP32-S3), otherwise the status LED below stays dark.
 
-- `DEVICE_ID` — must be unique for every ESP32
-- `DHTPIN` (4) and `DHTTYPE` (DHT11)
+**Device ID:** every board makes its own id from its hardware address, e.g. `esp32-a1b2c3`, so the same
+sketch can be uploaded to every ESP32. The serial monitor prints it at start-up (`Device ID: ...`). To choose
+it yourself, add `#define DEVICE_ID "esp32-room1"` to `config.h` (every board needs a different one).
+
+**Status LED:** the board's own LED shows how the room is, with the same ranges as the dashboard:
+green = comfortable, yellow = a little outside, red = far outside or the sensor failed, blinking blue =
+connecting. Boards with a color dot (ESP32-S3 / C3 / C6 DevKits) show the colors; the classic ESP32 DevKit
+only has a blue LED, so there it is steady = fine, slow blink = meh, fast blink = warning. If the dot on an
+ESP32-S3 DevKitC-1 v1.1 stays dark, add `#define STATUS_RGB_PIN 38` to `config.h`.
 
 Then **Upload** (hold the **IO0** button while it says "Connecting…"). The values are stored inside the
 board's program, so after changing them the sketch must be uploaded again. The EN button only restarts the
@@ -161,9 +169,9 @@ Open `dashboard/index.html` on the computer running Mosquitto. The banner at the
 **connected**. From another device, add the broker address: `index.html?broker=ws://<computer-ip>:9001`.
 At the top is a rotatable 3D floor plan (3 floors, 16 rooms, each with a unique id such as `G01`).
 The dashboard subscribes to `sensors/+/data` and shows each reading in the room whose `device` matches
-the ESP32's `DEVICE_ID`. Only the living room (`G01` → `esp32-room1`) has a sensor so far; to add one,
-flash an ESP32 with a new `DEVICE_ID` and set it as that room's `device` in the `ROOMS` list in
-`dashboard/index.html`. Devices that are not in the list are named in the bar at the top.
+the ESP32's device id. For now, a board whose id is not in the `ROOMS` list in `dashboard/index.html` is
+put in a random free room; the browser remembers it, and the bar at the top shows where each board went.
+To give a board a fixed room, set that room's `device` to the board's id.
 History is only kept while the page is open; reading stored history from the database needs a small
 HTTP API that is not built yet.
 `index.mockup.html` is the original mockup with simulated data.
