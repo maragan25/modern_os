@@ -82,6 +82,8 @@ PubSubClient mqtt(wifiClient);
 
 char topic[64];        // sensors/<id>/data   we publish readings here
 char topicSaved[64];   // sensors/<id>/saved  subscriber.py answers here after it has written a row to the database
+char topicStatus[64];  // sensors/<id>/status "online" (retained) once connected; the broker publishes "offline" if we vanish (Last Will)
+const uint16_t MQTT_KEEPALIVE_S = 5;  // the broker declares us gone after 1.5 x this (about 8 s) and publishes the Last Will
 unsigned long lastRead = 0;
 unsigned long readingCount = 0;
 
@@ -210,8 +212,11 @@ void connectWiFi() {
 void connectMQTT() {
   while (!mqtt.connected()) {
     Serial.printf("Connecting to MQTT broker %s:%d ... ", MQTT_HOST, MQTT_PORT);
-    if (mqtt.connect(deviceId)) {
+    // Last Will: if this board disappears without saying goodbye (power cut, Wi-Fi gone), the broker
+    // itself publishes "offline" (retained, QoS 1) on our status topic.
+    if (mqtt.connect(deviceId, NULL, NULL, topicStatus, 1, true, "offline")) {
       Serial.println("connected");
+      mqtt.publish(topicStatus, "online", true);   // retained: a dashboard opened later still learns we are here
       // A fresh connection starts without subscriptions, so this is repeated after every reconnect.
       mqtt.subscribe(topicSaved);
       Serial.printf("Listening for save confirmations on: %s\n", topicSaved);
@@ -241,10 +246,12 @@ void setup() {
 
   snprintf(topic, sizeof(topic), "sensors/%s/data", deviceId);
   snprintf(topicSaved, sizeof(topicSaved), "sensors/%s/saved", deviceId);
+  snprintf(topicStatus, sizeof(topicStatus), "sensors/%s/status", deviceId);
   Serial.printf("Device ID: %s\n", deviceId);
   Serial.printf("Publishing to topic: %s\n\n", topic);
 
   mqtt.setServer(MQTT_HOST, MQTT_PORT);
+  mqtt.setKeepAlive(MQTT_KEEPALIVE_S);
   mqtt.setCallback(onMessage);
 }
 

@@ -11,6 +11,9 @@ Topic format: `sensors/<device_id>/data`, payload
 Each board sends a reading every 5 seconds (that is what the live dashboard shows), but only **one reading per
 device every 15 minutes** is stored in the database. After each stored reading `subscriber.py` publishes
 `sensors/<device_id>/saved`, and the board blinks its LED once.
+Each board also publishes `online` (retained) to `sensors/<device_id>/status` when it connects, and registers
+an `offline` message as its *Last Will*: if the board disappears without saying goodbye (power cut, Wi-Fi gone),
+the broker itself publishes `offline` about 8 seconds later.
 
 ## Setting up on a new computer
 
@@ -203,6 +206,10 @@ The dashboard subscribes to `sensors/+/data` and shows each reading in the room 
 the ESP32's device id. For now, a board whose id is not in the `ROOMS` list in `dashboard/index.html` is
 put in a random free room; the browser remembers it, and the bar at the top shows where each board went.
 To give a board a fixed room, set that room's `device` to the board's id.
+A room turns **Offline** as soon as the board's status says `offline` (about 8 s after it vanished); if no
+status arrives, it still turns Offline after 30 seconds without a reading. The broker keeps the last status in
+memory, so a dashboard opened later knows right away; after a broker restart that memory is empty, and the
+30-second rule takes over until the boards reconnect.
 Every device in the database gets a room, also boards that are unplugged now (shown as Offline with
 their past readings). The charts and the Today card come from the database (one stored point per 15 minutes),
 and live readings, one every 5 seconds, are added on top as they arrive.
@@ -215,6 +222,7 @@ and live readings, one every 5 seconds, are added on top as they arrive.
 | PostgreSQL | `sc query postgresql-x64-18` | `STATE : 4 RUNNING` |
 | Broker | `netstat -ano \| findstr ":1883 :9001"` | two `LISTENING` lines |
 | Messages arriving | `mosquitto_sub -h localhost -t "sensors/#" -v` | a reading every 5 s |
+| Board status | `mosquitto_sub -h localhost -t "sensors/+/status" -v` | `online` for every connected board (`offline` for one that vanished) |
 | Rows being saved | the `SELECT` in step 4 | a new row per device every 15 minutes (the board blinks) |
 | History API | open `http://localhost:8000/api/devices` | a list with your device ids |
 
