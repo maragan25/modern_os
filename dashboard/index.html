@@ -811,9 +811,9 @@ function timeTicks(t0, t1, rangeKey) {
   return ticks;
 }
 
-// The usual spacing between the points, ignoring the 5-second live ones. Boards now store one reading every
-// 15 minutes (older data is denser), so "a break in the line" and "a gap" must be judged against that spacing,
-// not against a fixed number of minutes.
+// The usual spacing between the points, ignoring the 5-second live ones. Stored readings are only as dense as
+// the subscriber's save interval (100 seconds by default, adjustable; older data may be denser), so "a break in
+// the line" and "a gap" must be judged against that spacing, not against a fixed number of minutes.
 function typicalStep(pts) {
   const steps = [];
   for (let i = 1; i < pts.length; i++) { const dt = pts[i].t - pts[i - 1].t; if (dt >= 50e3) steps.push(dt); }
@@ -1085,7 +1085,7 @@ function renderFacts(pts, now, off) {
   const gotHour = Math.min(expected, pts.filter((p) => p.t >= since).length);
   const day = pts.filter((p) => p.t >= now - DAY);
   const gaps = [];
-  // a gap is a step much longer than the usual spacing (15 minutes for stored readings, so 37 min or more)
+  // a gap is a step much longer than the usual spacing (and never less than 10 minutes)
   const gapAfter = Math.max(10 * MIN, 2.5 * typicalStep(day));
   for (let i = 1; i < day.length; i++) if (day[i].t - day[i - 1].t > gapAfter) gaps.push([day[i - 1].t, day[i].t]);
   const gapText = gaps.length

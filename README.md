@@ -9,7 +9,7 @@ ESP32 + DHT11 ──MQTT (port 1883)──► Mosquitto ─┤
 Topic format: `sensors/<device_id>/data`, payload
 `{"temperature": 23.4, "humidity": 45.0, "heat_index": 23.1}`.
 Each board sends a reading every 5 seconds (that is what the live dashboard shows), but only **one reading per
-device every 15 minutes** is stored in the database. After each stored reading `subscriber.py` publishes
+device every 100 seconds** is stored in the database (adjustable, see step 5). After each stored reading `subscriber.py` publishes
 `sensors/<device_id>/saved`, and the board blinks its LED once.
 Each board also publishes `online` (retained) to `sensors/<device_id>/status` when it connects, and registers
 an `offline` message as its *Last Will*: if the board disappears without saying goodbye (power cut, Wi-Fi gone),
@@ -105,7 +105,7 @@ net start postgresql-x64-18
 
 ### 5. Python libraries and the subscriber
 
-The subscriber copies one MQTT reading per device every 15 minutes into the database. In cmd, inside this project folder:
+The subscriber copies one MQTT reading per device every 100 seconds into the database. In cmd, inside this project folder:
 
 ```
 py -m venv .venv
@@ -117,8 +117,10 @@ python subscriber.py
 
 `requirements.txt` lists `paho-mqtt` and `psycopg[binary]`. Expect `Connected to PostgreSQL`,
 `Connected to MQTT broker`, and then a `-> saved` line for each device: the first reading after the
-subscriber starts is saved at once, then one every 15 minutes. To test quickly, set a shorter interval
-before starting it: `set IOT_SAVE_EVERY_S=30`.
+subscriber starts is saved at once, then one every 100 seconds (about 860 rows a day per device).
+**Changing the interval:** `python subscriber.py --every 30` (seconds; `0` stores every reading), or set
+`IOT_SAVE_EVERY_S=30` before starting it (the option wins over the variable), or change `DEFAULT_SAVE_EVERY_S`
+at the top of `subscriber.py`. With `start.bat`: `start.bat --every 30`.
 The password is never stored in a file. Do not copy or commit `.venv`: it contains paths to the
 computer that created it, so create a new one on each computer.
 
@@ -181,7 +183,7 @@ change it.) Connection and database saves look the same on every board:
 | slow blink / blue blink | connecting to Wi-Fi and the broker |
 | solid on / solid red | an attempt failed; it keeps retrying (the Serial Monitor says why) |
 | fast flashing for 3 s / green flashing | Wi-Fi and MQTT connected |
-| one short blink / one white blink | `subscriber.py` saved a reading in the database (every 15 minutes) |
+| one short blink / one white blink | `subscriber.py` saved a reading in the database (every 100 seconds) |
 
 After the 3 seconds the two kinds of board differ. The classic ESP32 DevKit only has a blue LED, so it goes
 **off**. Boards with a color dot (ESP32-S3 / C3 / C6 DevKits) show how the room is, with the same ranges as the
@@ -211,9 +213,32 @@ status arrives, it still turns Offline after 30 seconds without a reading. The b
 memory, so a dashboard opened later knows right away; after a broker restart that memory is empty, and the
 30-second rule takes over until the boards reconnect.
 Every device in the database gets a room, also boards that are unplugged now (shown as Offline with
-their past readings). The charts and the Today card come from the database (one stored point per 15 minutes),
+their past readings). The charts and the Today card come from the database (one stored point per 100 seconds by default),
 and live readings, one every 5 seconds, are added on top as they arrive.
 `index.mockup.html` is the original mockup with simulated data.
+
+### 8. Starting everything (every day)
+
+After the one-time setup above, double-click **`start.bat`** (or run it in cmd, inside the project folder).
+It checks first and starts afterwards, and tells you in plain words what is wrong if something is:
+
+- the Python packages are installed (in `.venv`)
+- `MQTT_HOST` in `esp32_mqtt/config.h` is really this computer's address (and offers to fix it; a board must
+  then be uploaded again, because the address is stored inside its program)
+- the Mosquitto and PostgreSQL services run, and starts them if not (Windows asks for administrator
+  permission for just that step)
+- nothing else holds ports 1883 / 9001, Mosquitto does not listen on this computer only, there is no second
+  Mosquitto, `mosquitto.conf` has the listeners, and the firewall rule covers your Wi-Fi's profile (Private)
+- the database password works: it is taken from `PGPASSWORD` if set, otherwise asked (never saved)
+- the broker answers on both 1883 and 9001
+
+Then it opens `subscriber.py` and `api.py` in their own Windows Terminal tabs (separate windows if Windows
+Terminal is not installed), waits a few seconds and lists which boards are sending. A second subscriber is never
+started: two would store every reading twice.
+
+`start.bat --check` only looks and changes nothing. `start.bat --stop` stops `subscriber.py` and `api.py` (the
+services keep running). `start.bat -y` answers yes to its questions. `start.bat --every 30` sets how often the subscriber stores a
+reading, in seconds. Ctrl+C in a tab stops that program.
 
 ## Checking that everything is running
 
@@ -223,7 +248,7 @@ and live readings, one every 5 seconds, are added on top as they arrive.
 | Broker | `netstat -ano \| findstr ":1883 :9001"` | two `LISTENING` lines |
 | Messages arriving | `mosquitto_sub -h localhost -t "sensors/#" -v` | a reading every 5 s |
 | Board status | `mosquitto_sub -h localhost -t "sensors/+/status" -v` | `online` for every connected board (`offline` for one that vanished) |
-| Rows being saved | the `SELECT` in step 4 | a new row per device every 15 minutes (the board blinks) |
+| Rows being saved | the `SELECT` in step 4 | a new row per device every 100 seconds (the board blinks) |
 | History API | open `http://localhost:8000/api/devices` | a list with your device ids |
 
 Test without hardware:
