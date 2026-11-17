@@ -14,6 +14,7 @@ device every 100 seconds** is stored in the database (adjustable, see step 5). A
 Each board also publishes `online` (retained) to `sensors/<device_id>/status` when it connects, and registers
 an `offline` message as its *Last Will*: if the board disappears without saying goodbye (power cut, Wi-Fi gone),
 the broker itself publishes `offline` about 8 seconds later.
+Readings older than **7 days** are deleted once a day, so the database stays small.
 
 ## Setting up on a new computer
 
@@ -121,6 +122,8 @@ subscriber starts is saved at once, then one every 100 seconds (about 860 rows a
 **Changing the interval:** `python subscriber.py --every 30` (seconds; `0` stores every reading), or set
 `IOT_SAVE_EVERY_S=30` before starting it (the option wins over the variable), or change `DEFAULT_SAVE_EVERY_S`
 at the top of `subscriber.py`. With `start.bat`: `start.bat --every 30`.
+When it starts, and then once a day, it also deletes readings older than 7 days and prints
+`clean-up: deleted N reading(s) older than 7 days`. To keep them longer, e.g. 30 days: `set IOT_KEEP_DAYS=30`.
 The password is never stored in a file. Do not copy or commit `.venv`: it contains paths to the
 computer that created it, so create a new one on each computer.
 

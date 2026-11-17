@@ -1058,8 +1058,8 @@ function renderToday(pts, now) {
   const mid = new Date(now); mid.setHours(0, 0, 0, 0);
   const today = pts.filter((p) => p.t >= mid.getTime());
   if (!today.length) { $("today").innerHTML = ""; $("today-foot").textContent = "No readings yet today."; return; }
-  // stored points are 5-minute averages: use their min / max for the extremes, and weight the
-  // averages by n (how many readings a point stands for; a live reading is 1)
+  // stored points are averages per time bucket: use their min / max for the extremes, and weight
+  // the averages by n (how many readings a point stands for; a live reading is 1)
   const lo = (p, k) => p[k + "Lo"] ?? p[k], hi = (p, k) => p[k + "Hi"] ?? p[k], n = (p) => p.n ?? 1;
   const pick = (key, val, cmp) => today.reduce((a, b) => (cmp(val(b, key), val(a, key)) ? b : a));
   const tLo = pick("temp", lo, (a, b) => a < b), tHi = pick("temp", hi, (a, b) => a > b);
