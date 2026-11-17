@@ -37,9 +37,9 @@ protocol websockets
 
 **Why:** the ESP32 is a different device that connects *into* this computer. Windows blocks incoming
 connections to ports it has not been told to allow, so without this rule the ESP32 prints
-`failed (state -2)` and never connects. Port 1883 is needed for the ESP32. Port 9001 is only needed if
-the dashboard is opened from *another* device; the same computer reaches it through `localhost`,
-which the firewall does not block. The rule is limited to **Private** networks so the ports stay
+`failed (state -2)` and never connects. Port 1883 is needed for the ESP32. Ports 9001 (live data) and
+8000 (the dashboard and its history, from `api.py`) are only needed if the dashboard is opened from
+*another* device; the same computer reaches them through `localhost`, which the firewall does not block. The rule is limited to **Private** networks so the ports stay
 closed on public Wi-Fi.
 
 1. Make sure the Wi-Fi network is set to **Private**: *Settings → Network & internet → Wi-Fi →
@@ -47,10 +47,10 @@ closed on public Wi-Fi.
 2. Add the rule, either:
    - **PowerShell as administrator, one command:**
      ```
-     New-NetFirewallRule -DisplayName "Mosquitto" -Direction Inbound -Protocol TCP -LocalPort 1883,9001 -Action Allow -Profile Private
+     New-NetFirewallRule -DisplayName "Mosquitto" -Direction Inbound -Protocol TCP -LocalPort 1883,9001,8000 -Action Allow -Profile Private
      ```
    - **or in the GUI:** *Windows Defender Firewall with Advanced Security → Inbound Rules → New Rule…
-     → Port → TCP → Specific local ports: `1883, 9001` → Allow the connection →* tick **only Private**
+     → Port → TCP → Specific local ports: `1883, 9001, 8000` → Allow the connection →* tick **only Private**
      *→ name it "Mosquitto"*.
 
 ### 3. Start the broker
@@ -117,6 +117,18 @@ computer that created it, so create a new one on each computer.
 By default the subscriber connects to `host=localhost port=5432 dbname=iot user=postgres`.
 Override it with the `IOT_DB_DSN` environment variable (for example when PostgreSQL uses port 5433).
 
+**The history API.** A browser cannot talk to PostgreSQL, so `api.py` sits in between: it reads the
+`readings` table and answers the dashboard over HTTP. It also serves the dashboard itself. Start it in a
+**second** cmd window (same folder, same steps: activate `.venv`, `set PGPASSWORD=...`):
+
+```
+python api.py
+```
+
+It only reads, so readings keep being saved by `subscriber.py` even if `api.py` is stopped. Try it:
+`http://localhost:8000/api/devices` and `http://localhost:8000/api/history?device=<id>&range=24h`
+(`range` is `1h`, `24h` or `7d`: averages per 1 minute, 5 minutes or 1 hour, with min and max).
+
 ### 6. The ESP32
 
 Sketch: `esp32_mqtt/esp32_mqtt.ino`. In the Arduino IDE install the libraries **PubSubClient**
@@ -150,6 +162,8 @@ actually have (e.g. *ESP32S3 Dev Module* for an ESP32-S3), otherwise the status 
 **Device ID:** every board makes its own id from its hardware address, e.g. `esp32-a1b2c3`, so the same
 sketch can be uploaded to every ESP32. The serial monitor prints it at start-up (`Device ID: ...`). To choose
 it yourself, add `#define DEVICE_ID "esp32-room1"` to `config.h` (every board needs a different one).
+The board that already saved readings as `A7-27` keeps that name with `#define DEVICE_ID "A7-27"`, so its
+history stays together.
 
 **Status LED:** the board's own LED shows how the room is, with the same ranges as the dashboard:
 green = comfortable, yellow = a little outside, red = far outside or the sensor failed, blinking blue =
@@ -165,15 +179,18 @@ Wiring (DHT11 module): `S` → GPIO 4, middle pin → 3V3, other end → GND. Ne
 
 ### 7. The dashboard
 
-Open `dashboard/index.html` on the computer running Mosquitto. The banner at the top should say
-**connected**. From another device, add the broker address: `index.html?broker=ws://<computer-ip>:9001`.
+With `api.py` running, open **http://localhost:8000** on the computer running Mosquitto, or
+**http://&lt;computer-ip&gt;:8000** from a phone or laptop on the same network. The bar at the top should say
+**connected** and "History: from the database". (Opening `dashboard/index.html` as a file also works on
+that computer; then the history comes from `http://localhost:8000`.)
 At the top is a rotatable 3D floor plan (3 floors, 16 rooms, each with a unique id such as `G01`).
 The dashboard subscribes to `sensors/+/data` and shows each reading in the room whose `device` matches
 the ESP32's device id. For now, a board whose id is not in the `ROOMS` list in `dashboard/index.html` is
 put in a random free room; the browser remembers it, and the bar at the top shows where each board went.
 To give a board a fixed room, set that room's `device` to the board's id.
-History is only kept while the page is open; reading stored history from the database needs a small
-HTTP API that is not built yet.
+Every device in the database gets a room, also boards that are unplugged now (shown as Offline with
+their past readings). The charts and the Today card come from the database, and live readings are added
+on top as they arrive.
 `index.mockup.html` is the original mockup with simulated data.
 
 ## Checking that everything is running
@@ -184,6 +201,7 @@ HTTP API that is not built yet.
 | Broker | `netstat -ano \| findstr ":1883 :9001"` | two `LISTENING` lines |
 | Messages arriving | `mosquitto_sub -h localhost -t "sensors/#" -v` | a reading every 5 s |
 | Rows being saved | the `SELECT` in step 4 | the newest row is seconds old |
+| History API | open `http://localhost:8000/api/devices` | a list with your device ids |
 
 Test without hardware:
 `mosquitto_pub -h localhost -t sensors/test/data -m "{\"temperature\": 24.5, \"humidity\": 50}"`

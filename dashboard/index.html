@@ -265,7 +265,7 @@ dl.facts code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-siz
 <div class="banner">
   <div class="wrap">
     <p id="broker-text">MQTT broker: connecting…</p>
-    <p>History is kept only while this page is open (database comes later).</p>
+    <p id="history-text">History: loading from the database…</p>
   </div>
 </div>
 
@@ -406,11 +406,14 @@ dl.facts code { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-siz
 
 <script src="https://unpkg.com/mqtt@5.10.1/dist/mqtt.min.js"></script>
 <script>
-// Broker address: opened from this laptop, "localhost" works. On another device
-// (e.g. the hand-held), open the page with ?broker=ws://<laptop-ip>:9001
+// Broker address: the broker is on the PC the page comes from (http://<pc-ip>:8000 via
+// api.py, or "localhost" when opened as a file). Override with ?broker=ws://<pc-ip>:9001
 const params = new URLSearchParams(location.search);
 const CFG = {
   broker: params.get("broker") || `ws://${location.hostname || "localhost"}:9001`,
+  // History comes from api.py, which also serves this page (http://<pc>:8000): then it is the same
+  // address. Opened as a file, api.py is on this computer. Override with ?api=http://<pc-ip>:8000
+  api: params.get("api") ?? (location.protocol.startsWith("http") ? "" : "http://localhost:8000"),
   sensor: "DHT11",
   pin: 4,
   intervalSec: 5,       // must match READ_INTERVAL_MS in the ESP32 sketch
@@ -464,7 +467,8 @@ const ROOMS = [
 ];
 // ?device=<id> points the living room at another ESP32, as before
 if (params.get("device")) ROOMS.find((r) => r.id === "G01").device = params.get("device");
-for (const r of ROOMS) Object.assign(r, { history: [], lastTick: null });   // one entry per MQTT message
+// history: one entry per live MQTT message; stored: points from the database per range
+for (const r of ROOMS) Object.assign(r, { history: [], stored: {}, lastTick: null });
 const ROOM = Object.fromEntries(ROOMS.map((r) => [r.id, r]));
 const FLOOR = Object.fromEntries(FLOORS.map((f) => [f.id, f]));
 const BY_DEVICE = Object.fromEntries(ROOMS.filter((r) => r.device).map((r) => [r.device, r]));
@@ -499,10 +503,67 @@ const state = {
   room: startRoom.id,
   floor: startRoom.floor,
   unknown: new Set(),   // device ids that sent data but found no free room
+  stored: { s: "loading" },   // history from the database: loading | ok | error
   conn: "connecting",   // broker connection: connecting | connected | reconnecting | error
   connError: "",
 };
 const sel = () => ROOM[state.room];
+
+/* ---------- Stored history from the database (api.py) ---------- */
+
+// api.py answers one range at a time, already averaged: 1h -> 1-minute buckets, 24h -> 5 minutes,
+// 7d -> 1 hour, each with the min, max and number of readings. room.stored[range] keeps those
+// points; room.history keeps only the readings that arrived live since the page was opened.
+
+function setHistoryText() {
+  const h = state.stored;
+  $("history-text").textContent = h.s === "loading" ? "History: loading from the database…"
+    : h.s === "ok" ? `History: from the database (${h.devices} device${h.devices === 1 ? "" : "s"})`
+    : `History: database not reachable (${h.msg}), showing only readings since this page opened. Is api.py running?`;
+}
+
+async function getJSON(path) {
+  const res = await fetch(`${CFG.api}${path}`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+}
+
+async function loadStored(room, range) {
+  if (!room.device || room.stored[range]) return;
+  const answer = await getJSON(`/api/history?device=${encodeURIComponent(room.device)}&range=${range}`);
+  room.stored[range] = answer.points.map((p) => ({
+    t: Date.parse(p.t), n: p.n,
+    temp: p.temperature.avg, tempLo: p.temperature.min, tempHi: p.temperature.max,
+    hum: p.humidity.avg, humLo: p.humidity.min, humHi: p.humidity.max,
+  }));
+}
+
+// Every device the database knows gets a room (even if it is unplugged now). All rooms load the
+// last 24 hours (floor plan, Today and trends use them); the selected room also loads its chart range.
+async function loadHistory() {
+  try {
+    const known = await getJSON("/api/devices");
+    for (const { device, last_seen } of known) {
+      const room = BY_DEVICE[device] ?? autoPlace(device);
+      if (room && room.lastTick == null) room.lastTick = Date.parse(last_seen);
+    }
+    await Promise.all(ROOMS.filter((r) => r.device).map((r) => loadStored(r, "24h")));
+    await loadStored(sel(), state.range);
+    state.stored = { s: "ok", devices: known.length };
+  } catch (e) {
+    state.stored = { s: "error", msg: e.message === "Failed to fetch" ? "no answer" : e.message };
+  }
+  setHistoryText();
+  setBrokerText();
+  render();
+}
+
+// After choosing another room or range: fetch that range if it isn't loaded yet.
+function ensureStored() {
+  const room = sel();
+  if (state.stored.s !== "ok" || !room.device || room.stored[state.range]) return;
+  loadStored(room, state.range).then(render, (e) => console.warn("History:", e.message));
+}
 
 /* ---------- Live data from the MQTT broker (MQTT over WebSockets) ---------- */
 
@@ -568,8 +629,18 @@ function connectBroker() {
 
 /* ---------- Data access ---------- */
 
-function readings(room = sel()) { return room.history; }
-function latest(room) { return room.history[room.history.length - 1] ?? null; }
+// The stored points of a range (the 24 hours when that range isn't loaded), up to the first live
+// reading, then the live readings.
+function readings(room = sel(), range = "24h") {
+  const live = room.history;
+  const firstLive = live.length ? live[0].t : Infinity;
+  const stored = (room.stored[range] ?? room.stored["24h"] ?? []).filter((p) => p.t < firstLive);
+  return stored.concat(live);
+}
+function latest(room) {
+  const s = room.stored["24h"];
+  return room.history[room.history.length - 1] ?? (s && s[s.length - 1]) ?? null;
+}
 function lastSeen(room = sel()) { return room.lastTick; }
 function isOffline(room = sel()) { return Date.now() - lastSeen(room) > CFG.offlineAfterSec * 1000; }
 
@@ -592,8 +663,8 @@ function series(pts, rangeKey) {
     let g = groups.get(k);
     if (!g) groups.set(k, (g = { n: 0, ts: 0, hs: 0, tlo: Infinity, thi: -Infinity, hlo: Infinity, hhi: -Infinity }));
     g.n++; g.ts += p.temp; g.hs += p.hum;
-    g.tlo = Math.min(g.tlo, p.temp); g.thi = Math.max(g.thi, p.temp);
-    g.hlo = Math.min(g.hlo, p.hum); g.hhi = Math.max(g.hhi, p.hum);
+    g.tlo = Math.min(g.tlo, p.tempLo ?? p.temp); g.thi = Math.max(g.thi, p.tempHi ?? p.temp);
+    g.hlo = Math.min(g.hlo, p.humLo ?? p.hum); g.hhi = Math.max(g.hhi, p.humHi ?? p.hum);
   }
   const out = [...groups.entries()].map(([k, g]) => ({
     t: k + bucket / 2, temp: g.ts / g.n, hum: g.hs / g.n,
@@ -617,7 +688,9 @@ function ago(ms) {
   if (s < 60) return `${s} s ago`;
   const m = Math.round(s / 60);
   if (m < 60) return `${m} min ago`;
-  return `${Math.round(m / 60)} h ago`;
+  const h = Math.round(m / 60);
+  if (h < 48) return `${h} h ago`;
+  return `${Math.round(h / 24)} days ago`;
 }
 
 function dewPoint(t, rh) {
@@ -659,7 +732,7 @@ const RANK = { none: -1, ok: 0, warn: 1, bad: 2, off: 3 };
 // none = no sensor in this room, off = has a sensor but no recent reading (or none yet)
 function roomStatus(room) {
   if (!room.device) return "none";
-  if (!room.history.length || isOffline(room)) return "off";
+  if (!latest(room) || isOffline(room)) return "off";
   const cur = latest(room);
   const a = tempStatus(cur.temp).s, b = humStatus(cur.hum).s;
   return RANK[a] >= RANK[b] ? a : b;
@@ -859,12 +932,15 @@ function trendText(pts, cur, key, isTemp) {
 
 function renderWaiting(room) {
   const noSensor = !room.device;
+  const seen = room.lastTick;   // known from the database, but nothing in the last 24 hours
   $("live-pill").dataset.s = "off";
-  $("live-text").innerHTML = noSensor ? `<b>No sensor</b> in this room` : `<b>Waiting</b> · no reading yet`;
-  setChip($("verdict-chip"), "off", noSensor ? "No sensor" : "Waiting");
-  $("verdict-title").textContent = noSensor ? "No sensor here yet" : "Waiting for data";
+  $("live-text").innerHTML = noSensor ? `<b>No sensor</b> in this room`
+    : seen ? `<b>Offline</b> · last reading ${ago(Date.now() - seen)}` : `<b>Waiting</b> · no reading yet`;
+  setChip($("verdict-chip"), "off", noSensor ? "No sensor" : seen ? "Offline" : "Waiting");
+  $("verdict-title").textContent = noSensor ? "No sensor here yet" : seen ? "No recent data" : "Waiting for data";
   $("verdict-text").textContent = noSensor
     ? `Flash an ESP32 with its own DEVICE_ID, then add that id to room ${room.id} in the ROOMS list in dashboard/index.html.`
+    : seen ? `This sensor's last reading was ${new Date(seen).toLocaleString()}. Check that the ESP32 has power and is connected to WiFi.`
     : state.conn === "connected"
       ? `Connected to the broker. The first reading should arrive within ${CFG.intervalSec} seconds.`
       : "Connecting to the MQTT broker. Make sure Mosquitto is running with the WebSocket listener on port 9001.";
@@ -935,7 +1011,7 @@ function render() {
   drawSpark($("hum-spark"), lastHour, "hum", (h) => h);
 
   // history
-  const s = series(pts, state.range);
+  const s = series(readings(room, state.range), state.range);
   const { tMin, tMax, hMin, hMax } = CFG.comfort;
   $("temp-axis-unit").textContent = u;
   $("temp-band-label").textContent = `Shaded: comfortable ${fmt(toUnit(tMin), 0)}–${fmt(toUnit(tMax), 0)}${u}`;
@@ -951,20 +1027,24 @@ function renderToday(pts, now) {
   const mid = new Date(now); mid.setHours(0, 0, 0, 0);
   const today = pts.filter((p) => p.t >= mid.getTime());
   if (!today.length) { $("today").innerHTML = ""; $("today-foot").textContent = "No readings yet today."; return; }
-  const pick = (key, cmp) => today.reduce((a, b) => (cmp(b[key], a[key]) ? b : a));
-  const tLo = pick("temp", (a, b) => a < b), tHi = pick("temp", (a, b) => a > b);
-  const hLo = pick("hum", (a, b) => a < b), hHi = pick("hum", (a, b) => a > b);
+  // stored points are 5-minute averages: use their min / max for the extremes, and weight the
+  // averages by n (how many readings a point stands for; a live reading is 1)
+  const lo = (p, k) => p[k + "Lo"] ?? p[k], hi = (p, k) => p[k + "Hi"] ?? p[k], n = (p) => p.n ?? 1;
+  const pick = (key, val, cmp) => today.reduce((a, b) => (cmp(val(b, key), val(a, key)) ? b : a));
+  const tLo = pick("temp", lo, (a, b) => a < b), tHi = pick("temp", hi, (a, b) => a > b);
+  const hLo = pick("hum", lo, (a, b) => a < b), hHi = pick("hum", hi, (a, b) => a > b);
   const stat = (label, val, unit, t) => `<div class="stat"><span>${label}</span><strong class="num">${val}<small>${unit}</small></strong><em>at ${timeStr(t)}</em></div>`;
   $("today").innerHTML =
-    stat("Coolest", fmt(toUnit(tLo.temp)), `°${state.unit}`, tLo.t) +
-    stat("Warmest", fmt(toUnit(tHi.temp)), `°${state.unit}`, tHi.t) +
-    stat("Driest", fmt(hLo.hum, 0), "%", hLo.t) +
-    stat("Most humid", fmt(hHi.hum, 0), "%", hHi.t);
-  const avgT = today.reduce((a, p) => a + p.temp, 0) / today.length;
-  const avgH = today.reduce((a, p) => a + p.hum, 0) / today.length;
-  const inBand = today.filter((p) => tempStatus(p.temp).s === "ok" && humStatus(p.hum).s === "ok").length;
+    stat("Coolest", fmt(toUnit(lo(tLo, "temp"))), `°${state.unit}`, tLo.t) +
+    stat("Warmest", fmt(toUnit(hi(tHi, "temp"))), `°${state.unit}`, tHi.t) +
+    stat("Driest", fmt(lo(hLo, "hum"), 0), "%", hLo.t) +
+    stat("Most humid", fmt(hi(hHi, "hum"), 0), "%", hHi.t);
+  const total = today.reduce((a, p) => a + n(p), 0);
+  const avgT = today.reduce((a, p) => a + p.temp * n(p), 0) / total;
+  const avgH = today.reduce((a, p) => a + p.hum * n(p), 0) / total;
+  const inBand = today.reduce((a, p) => a + (tempStatus(p.temp).s === "ok" && humStatus(p.hum).s === "ok" ? n(p) : 0), 0);
   $("today-foot").innerHTML =
-    `Average <b class="num">${tempStr(avgT)}${state.unit}</b> and <b class="num">${fmt(avgH, 0)}%</b> · comfortable <b class="num">${Math.round((inBand / today.length) * 100)}%</b> of the time`;
+    `Average <b class="num">${tempStr(avgT)}${state.unit}</b> and <b class="num">${fmt(avgH, 0)}%</b> · comfortable <b class="num">${Math.round((inBand / total) * 100)}%</b> of the time`;
 }
 
 function renderFacts(pts, now, off) {
@@ -974,7 +1054,8 @@ function renderFacts(pts, now, off) {
   const gotHour = Math.min(expected, pts.filter((p) => p.t >= since).length);
   const day = pts.filter((p) => p.t >= now - DAY);
   const gaps = [];
-  for (let i = 1; i < day.length; i++) if (day[i].t - day[i - 1].t > 3 * MIN) gaps.push([day[i - 1].t, day[i].t]);
+  // stored points are 5 minutes apart, so a gap is a step longer than 10 minutes
+  for (let i = 1; i < day.length; i++) if (day[i].t - day[i - 1].t > 10 * MIN) gaps.push([day[i - 1].t, day[i].t]);
   const gapText = gaps.length
     ? `${gaps.length} · ${Math.round((gaps[0][1] - gaps[0][0]) / MIN)} min at ${timeStr(gaps[0][0])}`
     : "None";
@@ -1033,7 +1114,7 @@ function renderRooms() {
   $("stage").setAttribute("aria-label", `3D floor plan of the ${FLOOR[state.floor].name.toLowerCase()}. ${$("rooms-summary").textContent}. Arrow keys rotate, Page Up and Page Down change floor; choose a room from the list.`);
 }
 
-const statusText = (r, s) => (s === "none" ? "No sensor" : r.history.length ? "Offline" : "Waiting");
+const statusText = (r, s) => (s === "none" ? "No sensor" : latest(r) ? "Offline" : "Waiting");
 
 function selectRoom(id) {
   const room = ROOM[id];
@@ -1049,6 +1130,7 @@ function selectRoom(id) {
   try { history.replaceState(null, "", `#${id}`); } catch {}   // not allowed in some sandboxed previews
   hoverT = null; hideCursor();
   render();
+  ensureStored();
 }
 
 // the floor `dir` levels above (1) or below (-1) the current one, if there is one
@@ -1539,7 +1621,7 @@ function pressed(groupId, attr, value) {
 }
 
 bindSeg("unit", "unit", (u) => { state.unit = u; store.set("unit", u); render(); });
-bindSeg("range", "range", (r) => { state.range = r; store.set("range", r); hoverT = null; hideCursor(); render(); });
+bindSeg("range", "range", (r) => { state.range = r; store.set("range", r); hoverT = null; hideCursor(); render(); ensureStored(); });
 pressed("unit", "unit", state.unit);
 pressed("range", "range", state.range);
 
@@ -1548,6 +1630,7 @@ setBrokerText();
 bindStage();
 render();
 connectBroker();
+loadHistory();
 // Redraw every few seconds so "x s ago", the offline state and the chart's time axis stay current
 // even when no message arrives (that silence is how a dead sensor shows up).
 setInterval(render, CFG.intervalSec * 1000);
