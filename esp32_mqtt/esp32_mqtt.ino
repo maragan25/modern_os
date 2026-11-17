@@ -48,6 +48,13 @@ char deviceId[32];
   const uint8_t LED_PIN = RGB_BUILTIN;
 #else
   #define LED_IS_RGB 0
+  // Some boards wire the LED the other way round (it lights when the pin is LOW). Then the LED is on all the
+  // time and goes dark for a blink. If yours does that, add   #define STATUS_LED_INVERTED   to config.h.
+  #ifdef STATUS_LED_INVERTED
+  const uint8_t LED_ON_LEVEL = LOW, LED_OFF_LEVEL = HIGH;
+  #else
+  const uint8_t LED_ON_LEVEL = HIGH, LED_OFF_LEVEL = LOW;
+  #endif
   #ifdef LED_BUILTIN
   const uint8_t LED_PIN = LED_BUILTIN;
   #else
@@ -138,7 +145,7 @@ void updateLed() {
   else if (flashing)            on = flashOn;
   else                          on = pulse;
   static int shown = -1;
-  if (on != shown) { digitalWrite(LED_PIN, on ? HIGH : LOW); shown = on; }
+  if (on != shown) { digitalWrite(LED_PIN, on ? LED_ON_LEVEL : LED_OFF_LEVEL); shown = on; }
 #endif
 }
 
