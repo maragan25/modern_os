@@ -417,6 +417,7 @@ const CFG = {
   sensor: "DHT11",
   pin: 4,
   intervalSec: 5,       // must match READ_INTERVAL_MS in the ESP32 sketch
+  savedEverySec: 15 * 60,   // must match SAVE_EVERY_S in subscriber.py: stored points are this far apart
   decimals: 1,
   offlineAfterSec: 30,
   maxHistoryDays: 7,
@@ -855,7 +856,8 @@ function drawChart(svg, s, key, opt) {
   });
 
   // data
-  const segs = segments(pts, s.bucket * 2.5);
+  // a break in the line only where more than 2.5 save intervals are missing (stored points are 15 min apart)
+  const segs = segments(pts, Math.max(s.bucket, CFG.savedEverySec * 1000) * 2.5);
   const baseY = m.t + ih;
   for (const seg of segs) {
     const line = seg.map((p, i) => `${i ? "L" : "M"}${x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`).join("");
@@ -1027,8 +1029,8 @@ function renderToday(pts, now) {
   const mid = new Date(now); mid.setHours(0, 0, 0, 0);
   const today = pts.filter((p) => p.t >= mid.getTime());
   if (!today.length) { $("today").innerHTML = ""; $("today-foot").textContent = "No readings yet today."; return; }
-  // stored points are 5-minute averages: use their min / max for the extremes, and weight the
-  // averages by n (how many readings a point stands for; a live reading is 1)
+  // stored points are averages per time bucket: use their min / max for the extremes, and weight
+  // the averages by n (how many readings a point stands for; a live reading is 1)
   const lo = (p, k) => p[k + "Lo"] ?? p[k], hi = (p, k) => p[k + "Hi"] ?? p[k], n = (p) => p.n ?? 1;
   const pick = (key, val, cmp) => today.reduce((a, b) => (cmp(val(b, key), val(a, key)) ? b : a));
   const tLo = pick("temp", lo, (a, b) => a < b), tHi = pick("temp", hi, (a, b) => a > b);
@@ -1054,8 +1056,9 @@ function renderFacts(pts, now, off) {
   const gotHour = Math.min(expected, pts.filter((p) => p.t >= since).length);
   const day = pts.filter((p) => p.t >= now - DAY);
   const gaps = [];
-  // stored points are 5 minutes apart, so a gap is a step longer than 10 minutes
-  for (let i = 1; i < day.length; i++) if (day[i].t - day[i - 1].t > 10 * MIN) gaps.push([day[i - 1].t, day[i].t]);
+  // stored points are one save interval (15 min) apart, so a gap is a step of more than 2.5 intervals
+  const gapMs = CFG.savedEverySec * 1000 * 2.5;
+  for (let i = 1; i < day.length; i++) if (day[i].t - day[i - 1].t > gapMs) gaps.push([day[i - 1].t, day[i].t]);
   const gapText = gaps.length
     ? `${gaps.length} · ${Math.round((gaps[0][1] - gaps[0][0]) / MIN)} min at ${timeStr(gaps[0][0])}`
     : "None";

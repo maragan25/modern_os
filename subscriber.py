@@ -9,12 +9,16 @@ After each saved row it publishes a short message to sensors/<device_id>/saved.
 The ESP32 listens on that topic and blinks its LED once, so the light means
 "the database really saved this reading".
 
+Once a day (and when it starts) it deletes readings older than KEEP_DAYS (7 days),
+so the database does not keep growing. The dashboard never shows more than 7 days.
+
 Expected payload (JSON):
     {"temperature": 23.4, "humidity": 45.1, "heat_index": 23.1}
 """
 
 import json
 import os
+import threading
 import time
 from datetime import datetime
 
@@ -27,6 +31,10 @@ MQTT_TOPIC = "sensors/+/data"
 
 # One row per device every 15 minutes. Override with IOT_SAVE_EVERY_S (e.g. 30 to test quickly).
 SAVE_EVERY_S = int(os.environ.get("IOT_SAVE_EVERY_S", 15 * 60))
+
+# Readings older than this are deleted, once a day. Override with IOT_KEEP_DAYS.
+KEEP_DAYS = int(os.environ.get("IOT_KEEP_DAYS", 7))
+CLEANUP_EVERY_S = 24 * 60 * 60
 
 # Windows PostgreSQL listens on localhost and logs in as the "postgres" user.
 # The password is NOT stored here: set it in the terminal first, e.g.
@@ -41,6 +49,25 @@ except psycopg.OperationalError as e:
     raise SystemExit(f"Could not connect to PostgreSQL ({DB_DSN}):\n{e}\n"
                      "Is the PostgreSQL service running, and is PGPASSWORD set in this terminal?")
 print(f"Connected to PostgreSQL ({DB_DSN})")
+
+def delete_old_readings():
+    """Runs in its own thread: now, then once a day. It uses its own short connection,
+    because the MQTT callbacks use `db` and a connection must not be shared by two threads."""
+    while True:
+        try:
+            with psycopg.connect(DB_DSN, autocommit=True) as conn:
+                deleted = conn.execute(
+                    "DELETE FROM readings WHERE recorded_at < now() - make_interval(days => %s)",
+                    (KEEP_DAYS,),
+                ).rowcount
+            now = datetime.now().strftime("%H:%M:%S")
+            print(f"[{now}] clean-up: deleted {deleted} reading(s) older than {KEEP_DAYS} days")
+        except psycopg.Error as e:
+            print(f"Clean-up failed, trying again in a day: {e}")
+        time.sleep(CLEANUP_EVERY_S)
+
+
+threading.Thread(target=delete_old_readings, daemon=True).start()
 
 # device id -> time.monotonic() of its last saved reading (kept in memory only,
 # so the first reading after this program starts is always saved)

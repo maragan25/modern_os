@@ -10,7 +10,8 @@ Topic format: `sensors/<device_id>/data`, payload
 `{"temperature": 23.4, "humidity": 45.0, "heat_index": 23.1}`.
 Each board sends a reading every 5 seconds (that is what the live dashboard shows), but only **one reading per
 device every 15 minutes** is stored in the database. After each stored reading `subscriber.py` publishes
-`sensors/<device_id>/saved`, and the board blinks its LED once.
+`sensors/<device_id>/saved`, and the board blinks its LED once. Readings older than **7 days** are deleted
+once a day, so the database stays small.
 
 ## Setting up on a new computer
 
@@ -116,6 +117,8 @@ python subscriber.py
 `Connected to MQTT broker`, and then a `-> saved` line for each device: the first reading after the
 subscriber starts is saved at once, then one every 15 minutes. To test quickly, set a shorter interval
 before starting it: `set IOT_SAVE_EVERY_S=30`.
+When it starts, and then once a day, it also deletes readings older than 7 days and prints
+`clean-up: deleted N reading(s) older than 7 days`. To keep them longer, e.g. 30 days: `set IOT_KEEP_DAYS=30`.
 The password is never stored in a file. Do not copy or commit `.venv`: it contains paths to the
 computer that created it, so create a new one on each computer.
 
