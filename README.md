@@ -7,7 +7,10 @@ ESP32 + DHT11 ──MQTT (port 1883)──► Mosquitto ─┤
 ```
 
 Topic format: `sensors/<device_id>/data`, payload
-`{"temperature": 23.4, "humidity": 45.0, "heat_index": 23.1}`
+`{"temperature": 23.4, "humidity": 45.0, "heat_index": 23.1}`.
+Each board sends a reading every 5 seconds (that is what the live dashboard shows), but only **one reading per
+device every 15 minutes** is stored in the database. After each stored reading `subscriber.py` publishes
+`sensors/<device_id>/saved`, and the board blinks its LED once.
 
 ## Setting up on a new computer
 
@@ -99,7 +102,7 @@ net start postgresql-x64-18
 
 ### 5. Python libraries and the subscriber
 
-The subscriber copies every MQTT reading into the database. In cmd, inside this project folder:
+The subscriber copies one MQTT reading per device every 15 minutes into the database. In cmd, inside this project folder:
 
 ```
 py -m venv .venv
@@ -110,7 +113,9 @@ python subscriber.py
 ```
 
 `requirements.txt` lists `paho-mqtt` and `psycopg[binary]`. Expect `Connected to PostgreSQL`,
-`Connected to MQTT broker`, and then a `-> saved` line for every reading.
+`Connected to MQTT broker`, and then a `-> saved` line for each device: the first reading after the
+subscriber starts is saved at once, then one every 15 minutes. To test quickly, set a shorter interval
+before starting it: `set IOT_SAVE_EVERY_S=30`.
 The password is never stored in a file. Do not copy or commit `.venv`: it contains paths to the
 computer that created it, so create a new one on each computer.
 
@@ -165,11 +170,21 @@ it yourself, add `#define DEVICE_ID "esp32-room1"` to `config.h` (every board ne
 The board that already saved readings as `A7-27` keeps that name with `#define DEVICE_ID "A7-27"`, so its
 history stays together.
 
-**Status LED:** the board's own LED shows how the room is, with the same ranges as the dashboard:
-green = comfortable, yellow = a little outside, red = far outside or the sensor failed, blinking blue =
-connecting. Boards with a color dot (ESP32-S3 / C3 / C6 DevKits) show the colors; the classic ESP32 DevKit
-only has a blue LED, so there it is steady = fine, slow blink = meh, fast blink = warning. If the dot on an
-ESP32-S3 DevKitC-1 v1.1 stays dark, add `#define STATUS_RGB_PIN 38` to `config.h`.
+**Status LED:** the board's own LED. (The red light that is always on is the power LED; the sketch cannot
+change it.) Connection and database saves look the same on every board:
+
+| LED (plain blue LED / color dot) | Meaning |
+|---|---|
+| slow blink / blue blink | connecting to Wi-Fi and the broker |
+| solid on / solid red | an attempt failed; it keeps retrying (the Serial Monitor says why) |
+| fast flashing for 3 s / green flashing | Wi-Fi and MQTT connected |
+| one short blink / one white blink | `subscriber.py` saved a reading in the database (every 15 minutes) |
+
+After the 3 seconds the two kinds of board differ. The classic ESP32 DevKit only has a blue LED, so it goes
+**off**. Boards with a color dot (ESP32-S3 / C3 / C6 DevKits) show how the room is, with the same ranges as the
+dashboard: green = comfortable, yellow = a little outside, red = far outside or the sensor failed. If the dot on
+an ESP32-S3 DevKitC-1 v1.1 stays dark, add `#define STATUS_RGB_PIN 38` to `config.h`. The save blink only
+appears while `subscriber.py` is running.
 
 Then **Upload** (hold the **IO0** button while it says "Connecting…"). The values are stored inside the
 board's program, so after changing them the sketch must be uploaded again. The EN button only restarts the
@@ -189,8 +204,8 @@ the ESP32's device id. For now, a board whose id is not in the `ROOMS` list in `
 put in a random free room; the browser remembers it, and the bar at the top shows where each board went.
 To give a board a fixed room, set that room's `device` to the board's id.
 Every device in the database gets a room, also boards that are unplugged now (shown as Offline with
-their past readings). The charts and the Today card come from the database, and live readings are added
-on top as they arrive.
+their past readings). The charts and the Today card come from the database (one stored point per 15 minutes),
+and live readings, one every 5 seconds, are added on top as they arrive.
 `index.mockup.html` is the original mockup with simulated data.
 
 ## Checking that everything is running
@@ -200,7 +215,7 @@ on top as they arrive.
 | PostgreSQL | `sc query postgresql-x64-18` | `STATE : 4 RUNNING` |
 | Broker | `netstat -ano \| findstr ":1883 :9001"` | two `LISTENING` lines |
 | Messages arriving | `mosquitto_sub -h localhost -t "sensors/#" -v` | a reading every 5 s |
-| Rows being saved | the `SELECT` in step 4 | the newest row is seconds old |
+| Rows being saved | the `SELECT` in step 4 | a new row per device every 15 minutes (the board blinks) |
 | History API | open `http://localhost:8000/api/devices` | a list with your device ids |
 
 Test without hardware:

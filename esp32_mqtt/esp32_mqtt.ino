@@ -22,13 +22,24 @@ const int   MQTT_PORT     = 1883;
 // To choose the id yourself, add this line to config.h:   #define DEVICE_ID "esp32-room1"
 char deviceId[32];
 
-// ---------- Status LED ----------
-// The board's own LED shows how the room is, with the same rules as the dashboard:
-// green = comfortable, yellow = a little outside the range, red = far outside (or the sensor fails),
-// blinking blue = connecting to Wi-Fi / the broker.
-// Boards with a color dot (ESP32-S3, C3, C6 DevKits) show these colors. The classic ESP32 DevKit only
-// has a blue LED on GPIO 2, so there: steady = fine, slow blink = meh, fast blink = warning.
-// If the dot stays dark on an ESP32-S3 DevKitC-1 v1.1, add  #define STATUS_RGB_PIN 38  to config.h.
+/* ---------- Status LED ----------
+   The board's own LED. The red light that is always on is the power LED: it is wired to the power
+   supply, so no code can change it.
+
+   Every board shows the connection and the database saves the same way:
+     connecting to Wi-Fi / MQTT ...... blinking (blue on a color dot, the blue LED on a plain board)
+     connection failed ............... solid on (red on a color dot); the sketch keeps retrying
+     connected (Wi-Fi and MQTT) ...... fast flashing for 3 seconds (green on a color dot)
+     reading saved in the database ... one short blink (white on a color dot), from the "saved"
+                                       message that subscriber.py sends after every saved row
+
+   After the 3 seconds the two kinds of board differ:
+     plain board (classic ESP32 DevKit, blue LED on GPIO 2) ... LED off
+     color dot (ESP32-S3, C3, C6 DevKits) ... shows how the room is, with the same rules as the dashboard:
+                                              green = comfortable, yellow = a little outside the range,
+                                              red = far outside (or the sensor fails)
+
+   If the dot stays dark on an ESP32-S3 DevKitC-1 v1.1, add  #define STATUS_RGB_PIN 38  to config.h. */
 #if defined(STATUS_RGB_PIN)
   #define LED_IS_RGB 1
   const uint8_t LED_PIN = STATUS_RGB_PIN;
@@ -43,13 +54,25 @@ char deviceId[32];
   const uint8_t LED_PIN = 2;   // the blue LED on the classic ESP32 DevKit
   #endif
 #endif
-const uint8_t LED_LEVEL = 40;  // color brightness, 0-255: the dot is blinding at full power
+const uint8_t LED_LEVEL = 40;                  // color brightness, 0-255: the dot is blinding at full power
+const unsigned long BLINK_MS = 250;            // connecting: 250 ms on, 250 ms off
+const unsigned long FLASH_MS = 100;            // connected: 100 ms on, 100 ms off ...
+const unsigned long CONNECTED_FLASH_MS = 3000; // ... for 3 seconds
+const unsigned long SAVED_PULSE_MS = 300;      // one blink per saved reading
 
 // Comfort ranges, the same as CFG.comfort in dashboard/index.html
 const float T_MIN = 20, T_MAX = 26, H_MIN = 30, H_MAX = 60;
 
+// How the room is (only shown on color dot boards). ST_CONNECTING = no reading yet.
 enum Status { ST_CONNECTING, ST_OK, ST_MEH, ST_WARNING };
 Status status = ST_CONNECTING;
+
+// How the connection is. One "round" of connecting starts as CONNECTING; an attempt that fails
+// makes it FAILED (solid light) until a retry succeeds and it becomes UP.
+enum Link { LINK_CONNECTING, LINK_FAILED, LINK_UP };
+Link linkState = LINK_CONNECTING;
+unsigned long linkSince = 0;     // when the link became UP (for the 3 second flash)
+unsigned long pulseUntil = 0;    // the "saved" blink is on until this time
 
 const unsigned long READ_INTERVAL_MS = 5000;
 
@@ -57,7 +80,8 @@ DHT dht(DHTPIN, DHTTYPE);
 WiFiClient wifiClient;
 PubSubClient mqtt(wifiClient);
 
-char topic[64];
+char topic[64];        // sensors/<id>/data   we publish readings here
+char topicSaved[64];   // sensors/<id>/saved  subscriber.py answers here after it has written a row to the database
 unsigned long lastRead = 0;
 unsigned long readingCount = 0;
 
@@ -80,36 +104,51 @@ Status roomStatus(float t, float h) {
   return ST_OK;
 }
 
+void setLink(Link l) { linkState = l; if (l == LINK_UP) linkSince = millis(); }
+void ledPulse() { pulseUntil = millis() + SAVED_PULSE_MS; }
+
 // Call often (every loop and while waiting); it only writes to the LED when something changes.
 void updateLed() {
   unsigned long t = millis();
+  bool flashing = (linkState == LINK_UP) && (t - linkSince < CONNECTED_FLASH_MS);
+  bool flashOn = ((t - linkSince) / FLASH_MS) % 2 == 0;
+  bool blinkOn = (t / BLINK_MS) % 2 == 0;
+  bool pulse = (long)(pulseUntil - t) > 0;
 #if LED_IS_RGB
   uint8_t r = 0, g = 0, b = 0;
-  switch (status) {
-    case ST_OK:         g = LED_LEVEL; break;
-    case ST_MEH:        r = LED_LEVEL; g = LED_LEVEL * 6 / 10; break;   // yellow
-    case ST_WARNING:    r = LED_LEVEL; break;
-    case ST_CONNECTING: if ((t / 500) % 2 == 0) b = LED_LEVEL; break;
+  if (linkState == LINK_CONNECTING)      { if (blinkOn) b = LED_LEVEL; }
+  else if (linkState == LINK_FAILED)     { r = LED_LEVEL; }
+  else if (flashing)                { if (flashOn) g = LED_LEVEL; }
+  else if (pulse)                   { r = g = b = LED_LEVEL; }          // saved: white
+  else switch (status) {
+    case ST_OK:      g = LED_LEVEL; break;
+    case ST_MEH:     r = LED_LEVEL; g = LED_LEVEL * 6 / 10; break;        // yellow
+    case ST_WARNING: r = LED_LEVEL; break;
+    default: break;                                                      // no reading yet: dark
   }
   static uint32_t shown = 0xFFFFFFFF;
   uint32_t c = ((uint32_t)r << 16) | ((uint32_t)g << 8) | b;
   if (c != shown) { rgbLedWrite(LED_PIN, r, g, b); shown = c; }
 #else
   bool on;
-  switch (status) {
-    case ST_OK:      on = true; break;                     // steady
-    case ST_MEH:     on = (t / 1000) % 2 == 0; break;      // slow blink
-    case ST_WARNING: on = (t / 150) % 2 == 0; break;       // fast blink
-    default:         on = (t / 100) % 10 == 0; break;      // connecting: a short flash every second
-  }
+  if (linkState == LINK_CONNECTING)  on = blinkOn;
+  else if (linkState == LINK_FAILED) on = true;
+  else if (flashing)            on = flashOn;
+  else                          on = pulse;
   static int shown = -1;
   if (on != shown) { digitalWrite(LED_PIN, on ? HIGH : LOW); shown = on; }
 #endif
 }
 
+// Like delay(), but keeps the LED pattern running while it waits.
 void waitWithLed(unsigned long ms) {
   unsigned long start = millis();
-  while (millis() - start < ms) { updateLed(); delay(20); }
+  while (millis() - start < ms) { updateLed(); delay(10); }
+}
+
+// A message arrived on a topic we subscribed to.
+void onMessage(char* t, byte* payload, unsigned int length) {
+  if (strcmp(t, topicSaved) == 0) ledPulse();
 }
 
 const char* wifiStatusText(int s) {
@@ -126,7 +165,8 @@ const char* wifiStatusText(int s) {
 // Lists every network the ESP32 can see. If yours is missing, it is a band/visibility problem.
 void scanNetworks() {
   Serial.println("Scanning for WiFi networks ...");
-  int n = WiFi.scanNetworks();
+  int n = WiFi.scanNetworks(true);   // true = scan in the background, so the LED keeps its pattern meanwhile
+  while (n == WIFI_SCAN_RUNNING) { waitWithLed(100); n = WiFi.scanComplete(); }
   if (n <= 0) {
     Serial.println("  no networks found at all (antenna/power problem, or nothing on 2.4 GHz nearby)");
     return;
@@ -146,7 +186,6 @@ void scanNetworks() {
 }
 
 void connectWiFi() {
-  status = ST_CONNECTING;
   WiFi.mode(WIFI_STA);
   while (WiFi.status() != WL_CONNECTED) {
     scanNetworks();
@@ -161,6 +200,7 @@ void connectWiFi() {
     Serial.println();
     if (WiFi.status() != WL_CONNECTED) {
       int s = WiFi.status();
+      setLink(LINK_FAILED);   // the attempt failed: solid light until a retry succeeds
       Serial.printf("  failed after %lu s: %s (status %d). Retrying ...\n\n", WIFI_TIMEOUT_MS / 1000, wifiStatusText(s), s);
     }
   }
@@ -168,12 +208,15 @@ void connectWiFi() {
 }
 
 void connectMQTT() {
-  status = ST_CONNECTING;
   while (!mqtt.connected()) {
     Serial.printf("Connecting to MQTT broker %s:%d ... ", MQTT_HOST, MQTT_PORT);
     if (mqtt.connect(deviceId)) {
       Serial.println("connected");
+      // A fresh connection starts without subscriptions, so this is repeated after every reconnect.
+      mqtt.subscribe(topicSaved);
+      Serial.printf("Listening for save confirmations on: %s\n", topicSaved);
     } else {
+      setLink(LINK_FAILED);   // the attempt failed: solid light until a retry succeeds
       Serial.printf("failed (state %d), retrying in 5 s\n", mqtt.state());
       waitWithLed(5000);
     }
@@ -197,18 +240,26 @@ void setup() {
   Serial.println("========================================");
 
   snprintf(topic, sizeof(topic), "sensors/%s/data", deviceId);
+  snprintf(topicSaved, sizeof(topicSaved), "sensors/%s/saved", deviceId);
   Serial.printf("Device ID: %s\n", deviceId);
   Serial.printf("Publishing to topic: %s\n\n", topic);
 
-  connectWiFi();
   mqtt.setServer(MQTT_HOST, MQTT_PORT);
+  mqtt.setCallback(onMessage);
 }
 
 void loop() {
-  if (WiFi.status() != WL_CONNECTED) connectWiFi();
-  if (!mqtt.connected()) connectMQTT();
-  mqtt.loop();
   updateLed();
+
+  if (WiFi.status() != WL_CONNECTED || !mqtt.connected()) {
+    // One round of connecting: blink while trying, solid if an attempt fails, and when both
+    // Wi-Fi and MQTT are up, flash for 3 seconds.
+    setLink(LINK_CONNECTING);
+    if (WiFi.status() != WL_CONNECTED) connectWiFi();
+    if (!mqtt.connected()) connectMQTT();
+    setLink(LINK_UP);
+  }
+  mqtt.loop();
 
   if (millis() - lastRead < READ_INTERVAL_MS) return;
   lastRead = millis();
@@ -231,8 +282,8 @@ void loop() {
            tempC, humidity, heatIndexC);
 
   readingCount++;
-  const char* label[] = { "connecting", "fine", "meh", "WARNING" };
-  Serial.printf("[#%lu] %.1f °C, %.1f %%, feels like %.1f °C, LED: %s", readingCount, tempC, humidity, heatIndexC, label[status]);
+  const char* label[] = { "no reading yet", "fine", "meh", "WARNING" };
+  Serial.printf("[#%lu] %.1f °C, %.1f %%, feels like %.1f °C, room: %s", readingCount, tempC, humidity, heatIndexC, label[status]);
   if (mqtt.publish(topic, payload)) {
     Serial.println("  -> sent");
   } else {
