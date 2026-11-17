@@ -12,3 +12,7 @@ const char* MQTT_HOST     = "192.168.x.x";           // IPv4 of the computer run
 
 // Optional. Only if the color dot stays dark on an ESP32-S3 DevKitC-1 v1.1 (its LED is on GPIO 38).
 // #define STATUS_RGB_PIN 38
+
+// Optional. Only if the board's own blue LED behaves backwards: lit all the time, and dark for a moment where
+// it should blink. Some boards wire the LED so that it lights when the pin is LOW.
+// #define STATUS_LED_INVERTED

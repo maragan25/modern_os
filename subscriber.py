@@ -1,9 +1,14 @@
 """MQTT -> PostgreSQL bridge.
 
 Subscribes to sensors/<device_id>/data and stores one reading per device every
-SAVE_EVERY_S seconds (15 minutes) in the `readings` table of the `iot` database.
+SAVE_EVERY_S seconds (100 by default) in the `readings` table of the `iot` database.
 The ESP32s keep sending a reading every 5 seconds for the live dashboard; the ones
 between two saves are not stored.
+
+Change the interval without editing anything:
+    python subscriber.py --every 30        (seconds; 0 = store every reading)
+    set IOT_SAVE_EVERY_S=30                (environment variable, same meaning)
+or change DEFAULT_SAVE_EVERY_S below. The command-line option wins over the variable.
 
 After each saved row it publishes a short message to sensors/<device_id>/saved.
 The ESP32 listens on that topic and blinks its LED once, so the light means
@@ -16,6 +21,7 @@ Expected payload (JSON):
     {"temperature": 23.4, "humidity": 45.1, "heat_index": 23.1}
 """
 
+import argparse
 import json
 import os
 import threading
@@ -29,8 +35,27 @@ MQTT_HOST = "localhost"
 MQTT_PORT = 1883
 MQTT_TOPIC = "sensors/+/data"
 
-# One row per device every 15 minutes. Override with IOT_SAVE_EVERY_S (e.g. 30 to test quickly).
-SAVE_EVERY_S = int(os.environ.get("IOT_SAVE_EVERY_S", 15 * 60))
+DEFAULT_SAVE_EVERY_S = 100   # one row per device every 100 seconds (about 860 rows a day per device)
+
+
+def save_interval():
+    """Seconds between two saved rows of one device: --every, else IOT_SAVE_EVERY_S, else the default."""
+    ap = argparse.ArgumentParser(description="MQTT -> PostgreSQL bridge")
+    ap.add_argument("--every", metavar="SECONDS",
+                    help=f"store one reading per device every SECONDS (default {DEFAULT_SAVE_EVERY_S}; 0 = every reading)")
+    args = ap.parse_args()
+    raw = args.every if args.every is not None else os.environ.get("IOT_SAVE_EVERY_S", str(DEFAULT_SAVE_EVERY_S))
+    source = "--every" if args.every is not None else "IOT_SAVE_EVERY_S"
+    try:
+        seconds = int(raw)
+        if seconds < 0:
+            raise ValueError
+    except ValueError:
+        raise SystemExit(f"{source} must be a whole number of seconds, 0 or more (got {raw!r}).")
+    return seconds
+
+
+SAVE_EVERY_S = save_interval()
 
 # Readings older than this are deleted, once a day. Override with IOT_KEEP_DAYS.
 KEEP_DAYS = int(os.environ.get("IOT_KEEP_DAYS", 7))
@@ -80,7 +105,8 @@ def on_connect(client, userdata, flags, reason_code, properties):
         return
     print(f"Connected to MQTT broker at {MQTT_HOST}:{MQTT_PORT}")
     client.subscribe(MQTT_TOPIC)
-    print(f"Listening on '{MQTT_TOPIC}', saving one reading per device every {SAVE_EVERY_S} s ... (Ctrl+C to stop)\n")
+    every = f"one reading per device every {SAVE_EVERY_S} s" if SAVE_EVERY_S else "every reading"
+    print(f"Listening on '{MQTT_TOPIC}', saving {every} ... (Ctrl+C to stop)\n")
 
 
 def on_message(client, userdata, msg):

@@ -417,7 +417,6 @@ const CFG = {
   sensor: "DHT11",
   pin: 4,
   intervalSec: 5,       // must match READ_INTERVAL_MS in the ESP32 sketch
-  savedEverySec: 15 * 60,   // must match SAVE_EVERY_S in subscriber.py: stored points are this far apart
   decimals: 1,
   offlineAfterSec: 30,
   maxHistoryDays: 7,
@@ -425,6 +424,8 @@ const CFG = {
 };
 // One subscription for every sensor; each message is matched to a room by its device id.
 const TOPIC = "sensors/+/data";
+// Each ESP32 also publishes "online" / "offline" (its Last Will) to sensors/<device>/status.
+const TOPIC_STATUS = "sensors/+/status";
 
 const MIN = 60e3, HOUR = 60 * MIN, DAY = 24 * HOUR;
 const RANGES = {
@@ -469,7 +470,7 @@ const ROOMS = [
 // ?device=<id> points the living room at another ESP32, as before
 if (params.get("device")) ROOMS.find((r) => r.id === "G01").device = params.get("device");
 // history: one entry per live MQTT message; stored: points from the database per range
-for (const r of ROOMS) Object.assign(r, { history: [], stored: {}, lastTick: null });
+for (const r of ROOMS) Object.assign(r, { history: [], stored: {}, lastTick: null, boardOffline: false });
 const ROOM = Object.fromEntries(ROOMS.map((r) => [r.id, r]));
 const FLOOR = Object.fromEntries(FLOORS.map((f) => [f.id, f]));
 const BY_DEVICE = Object.fromEntries(ROOMS.filter((r) => r.device).map((r) => [r.device, r]));
@@ -603,6 +604,16 @@ function onReading(topic, payload) {
   const cut = t - CFG.maxHistoryDays * DAY;
   while (room.history.length && room.history[0].t < cut) room.history.shift();
   room.lastTick = t;
+  room.boardOffline = false;   // a reading means the board is back, whatever its status said
+  render();
+}
+
+// "online" / "offline" from the board (offline is published by the broker when the board vanishes).
+// Only for boards that already have a room: a reading places a new board, a status message does not.
+function onStatus(topic, payload) {
+  const room = BY_DEVICE[topic.split("/")[1]];
+  if (!room) return;
+  room.boardOffline = payload.trim() === "offline";
   render();
 }
 
@@ -620,12 +631,13 @@ function connectBroker() {
   });
   client.on("connect", () => {
     state.conn = "connected"; setBrokerText(); render();
-    client.subscribe(TOPIC, { qos: 0 });
+    client.subscribe([TOPIC, TOPIC_STATUS], { qos: 1 });
   });
   client.on("reconnect", () => { state.conn = "reconnecting"; setBrokerText(); });
   client.on("close", () => { if (state.conn === "connected") { state.conn = "reconnecting"; setBrokerText(); } });
   client.on("error", (err) => { state.conn = "error"; state.connError = err.message; setBrokerText(); });
-  client.on("message", (topic, message) => onReading(topic, message.toString()));
+  client.on("message", (topic, message) =>
+    (topic.endsWith("/status") ? onStatus : onReading)(topic, message.toString()));
 }
 
 /* ---------- Data access ---------- */
@@ -643,7 +655,8 @@ function latest(room) {
   return room.history[room.history.length - 1] ?? (s && s[s.length - 1]) ?? null;
 }
 function lastSeen(room = sel()) { return room.lastTick; }
-function isOffline(room = sel()) { return Date.now() - lastSeen(room) > CFG.offlineAfterSec * 1000; }
+// Offline when the board said so (its Last Will), or, as a fallback, after 30 seconds without a reading.
+function isOffline(room = sel()) { return room.boardOffline || Date.now() - lastSeen(room) > CFG.offlineAfterSec * 1000; }
 
 function nearestBefore(pts, t) {
   let lo = 0, hi = pts.length - 1;
@@ -798,6 +811,17 @@ function timeTicks(t0, t1, rangeKey) {
   return ticks;
 }
 
+// The usual spacing between the points, ignoring the 5-second live ones. Stored readings are only as dense as
+// the subscriber's save interval (100 seconds by default, adjustable; older data may be denser), so "a break in
+// the line" and "a gap" must be judged against that spacing, not against a fixed number of minutes.
+function typicalStep(pts) {
+  const steps = [];
+  for (let i = 1; i < pts.length; i++) { const dt = pts[i].t - pts[i - 1].t; if (dt >= 50e3) steps.push(dt); }
+  if (!steps.length) return 0;
+  steps.sort((a, b) => a - b);
+  return steps[steps.length >> 1];
+}
+
 function segments(pts, maxGap) {
   const segs = [];
   let cur = [];
@@ -856,10 +880,15 @@ function drawChart(svg, s, key, opt) {
   });
 
   // data
-  // a break in the line only where more than 2.5 save intervals are missing (stored points are 15 min apart)
-  const segs = segments(pts, Math.max(s.bucket, CFG.savedEverySec * 1000) * 2.5);
+  const segs = segments(pts, Math.max(s.bucket * 2.5, 2.5 * typicalStep(pts)));
   const baseY = m.t + ih;
   for (const seg of segs) {
+    if (seg.length === 1) {   // a lone reading (e.g. a short session): a line would draw nothing, so show it as a dot
+      const p = seg[0], px = x(p.t).toFixed(1);
+      if (p.lo != null && p.hi > p.lo) out += `<line x1="${px}" x2="${px}" y1="${y(p.hi).toFixed(1)}" y2="${y(p.lo).toFixed(1)}" stroke="currentColor" stroke-width="2" stroke-linecap="round" opacity="0.3"/>`;
+      out += `<circle cx="${px}" cy="${y(p.v).toFixed(1)}" r="3" fill="currentColor"/>`;
+      continue;
+    }
     const line = seg.map((p, i) => `${i ? "L" : "M"}${x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`).join("");
     if (seg[0].lo != null) {
       const upper = seg.map((p, i) => `${i ? "L" : "M"}${x(p.t).toFixed(1)},${y(p.hi).toFixed(1)}`).join("");
@@ -1056,9 +1085,9 @@ function renderFacts(pts, now, off) {
   const gotHour = Math.min(expected, pts.filter((p) => p.t >= since).length);
   const day = pts.filter((p) => p.t >= now - DAY);
   const gaps = [];
-  // stored points are one save interval (15 min) apart, so a gap is a step of more than 2.5 intervals
-  const gapMs = CFG.savedEverySec * 1000 * 2.5;
-  for (let i = 1; i < day.length; i++) if (day[i].t - day[i - 1].t > gapMs) gaps.push([day[i - 1].t, day[i].t]);
+  // a gap is a step much longer than the usual spacing (and never less than 10 minutes)
+  const gapAfter = Math.max(10 * MIN, 2.5 * typicalStep(day));
+  for (let i = 1; i < day.length; i++) if (day[i].t - day[i - 1].t > gapAfter) gaps.push([day[i - 1].t, day[i].t]);
   const gapText = gaps.length
     ? `${gaps.length} · ${Math.round((gaps[0][1] - gaps[0][0]) / MIN)} min at ${timeStr(gaps[0][0])}`
     : "None";
